@@ -16,9 +16,8 @@ class Settings(BaseSettings):
     initial_capital: float = 10000.0
 
     # Strategy allocation (must sum to 1.0)
-    carry_allocation: float = 0.40
-    momentum_allocation: float = 0.35
-    pairs_allocation: float = 0.25
+    carry_allocation: float = 0.50
+    momentum_allocation: float = 0.50
 
     # Momentum strategy
     momentum_lookback_days: int = 28

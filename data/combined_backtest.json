@@ -1,0 +1,32 @@
+{
+  "strategy": "combined_carry_momentum",
+  "start_date": "2021-01-01",
+  "end_date": "2026-03-31",
+  "initial_capital": 10000.0,
+  "best_allocation": "30/70 carry/momentum",
+  "final_value": 46333.36,
+  "total_return_pct": 363.3,
+  "cagr_pct": 34.0,
+  "max_drawdown_pct": 79.7,
+  "sharpe_ratio": 0.72,
+  "carry_final": 4637.53,
+  "momentum_final": 41695.83,
+  "benchmark_final": 23256.82,
+  "all_allocations": {
+    "30/70 carry/momentum": {
+      "cagr": 34.0
+    },
+    "40/60 carry/momentum": {
+      "cagr": 31.4
+    },
+    "50/50 carry/momentum": {
+      "cagr": 28.7
+    },
+    "60/40 carry/momentum": {
+      "cagr": 25.6
+    },
+    "70/30 carry/momentum": {
+      "cagr": 22.3
+    }
+  }
+}
