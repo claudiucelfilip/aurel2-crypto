@@ -1,0 +1,35 @@
+services:
+  aurel2-crypto:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: live --paper
+    restart: unless-stopped
+    environment:
+      - AUREL2_CRYPTO_BINANCE_API_KEY=${BINANCE_API_KEY}
+      - AUREL2_CRYPTO_BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - AUREL2_CRYPTO_BINANCE_TESTNET=${BINANCE_TESTNET:-true}
+      - AUREL2_CRYPTO_NTFY_TOPIC=${NTFY_TOPIC:-}
+    volumes:
+      - crypto-data:/root/.aurel2-crypto
+      - ../src:/app/src:ro
+      - ../config:/app/config:ro
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: dashboard --host 0.0.0.0 --port 8081
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - AUREL2_CRYPTO_BINANCE_API_KEY=${BINANCE_API_KEY}
+      - AUREL2_CRYPTO_BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - AUREL2_CRYPTO_BINANCE_TESTNET=${BINANCE_TESTNET:-true}
+    volumes:
+      - crypto-data:/root/.aurel2-crypto
+      - ../src:/app/src:ro
+
+volumes:
+  crypto-data:
