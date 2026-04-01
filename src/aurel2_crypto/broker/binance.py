@@ -39,35 +39,75 @@ class BinanceBroker(BaseBroker):
 
     async def connect(self) -> bool:
         try:
-            self._spot = ccxt.binance({
+            spot_config = {
                 "apiKey": self._api_key,
                 "secret": self._api_secret,
                 "enableRateLimit": True,
-            })
-            self._futures = ccxt.binanceusdm({
+            }
+            futures_config = {
                 "apiKey": self._api_key,
                 "secret": self._api_secret,
                 "enableRateLimit": True,
-            })
+            }
+
+            self._spot = ccxt.binance(spot_config)
 
             if self._testnet:
-                self._spot.set_sandbox_mode(True)
-                self._futures.set_sandbox_mode(True)
+                # Binance demo trading uses demo-api.binance.com
+                # Remap all API URLs from api.binance.com to demo-api.binance.com
+                for key in list(self._spot.urls["api"].keys()):
+                    url = self._spot.urls["api"][key]
+                    if "api.binance.com" in url:
+                        self._spot.urls["api"][key] = url.replace(
+                            "api.binance.com", "demo-api.binance.com"
+                        )
+                # Demo API doesn't support /sapi/ endpoints
+                self._spot.has["fetchCurrencies"] = False
+                self._spot.has["fetchMarginMarkets"] = False
+                self._spot.options["fetchMarkets"] = {"types": ["spot"]}
 
-            # Verify connection by loading markets
-            await asyncio.get_event_loop().run_in_executor(
-                None, self._spot.load_markets
-            )
-            await asyncio.get_event_loop().run_in_executor(
-                None, self._futures.load_markets
-            )
+            if self._testnet:
+                # Demo API: manually load spot markets (skip sapi/margin endpoints)
+                info = await self._run_sync(
+                    lambda: self._spot.publicGetExchangeInfo()
+                )
+                # Manually populate markets dict so ccxt doesn't call load_markets
+                self._spot.markets = {}
+                self._spot.markets_by_id = {}
+                for s in info.get("symbols", []):
+                    sym = s["baseAsset"] + "/" + s["quoteAsset"]
+                    market = {
+                        "id": s["symbol"], "symbol": sym,
+                        "base": s["baseAsset"], "quote": s["quoteAsset"],
+                        "baseId": s["baseAsset"], "quoteId": s["quoteAsset"],
+                        "active": s["status"] == "TRADING", "type": "spot",
+                        "spot": True, "margin": False, "swap": False,
+                        "future": False, "option": False,
+                        "info": s,
+                    }
+                    self._spot.markets[sym] = market
+                    self._spot.markets_by_id[s["symbol"]] = market
+
+                # Verify auth with account endpoint
+                await self._run_sync(
+                    lambda: self._spot.privateGetAccount({"timestamp": int(__import__("time").time() * 1000)})
+                )
+
+                # Demo is spot-only — no futures
+                self._futures = None
+                logger.warning("binance_demo_no_futures", msg="Demo API is spot-only. Carry strategy disabled.")
+            else:
+                self._futures = ccxt.binanceusdm(futures_config)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._futures.load_markets
+                )
 
             self._connected = True
             logger.info(
                 "binance_connected",
                 testnet=self._testnet,
                 spot_markets=len(self._spot.markets),
-                futures_markets=len(self._futures.markets),
+                futures_markets=len(self._futures.markets) if self._futures else 0,
             )
             return True
         except Exception as e:
@@ -92,11 +132,14 @@ class BinanceBroker(BaseBroker):
         self._ensure_connected()
 
         spot_balance = await self._run_sync(self._spot.fetch_balance)
-        futures_balance = await self._run_sync(self._futures.fetch_balance)
-
         spot_total = float(spot_balance.get("total", {}).get("USDT", 0))
-        futures_total = float(futures_balance.get("total", {}).get("USDT", 0))
-        futures_free = float(futures_balance.get("free", {}).get("USDT", 0))
+
+        futures_total = 0.0
+        futures_free = 0.0
+        if self._futures:
+            futures_balance = await self._run_sync(self._futures.fetch_balance)
+            futures_total = float(futures_balance.get("total", {}).get("USDT", 0))
+            futures_free = float(futures_balance.get("free", {}).get("USDT", 0))
 
         return AccountSummary(
             total_value=spot_total + futures_total,
@@ -126,7 +169,9 @@ class BinanceBroker(BaseBroker):
                         side="long",
                     ))
 
-        # Futures positions
+        # Futures positions (only if futures is available)
+        if not self._futures:
+            return positions
         futures_positions = await self._run_sync(self._futures.fetch_positions)
         for pos in futures_positions:
             contracts = float(pos.get("contracts", 0))
@@ -209,8 +254,17 @@ class BinanceBroker(BaseBroker):
     async def get_market_price(self, symbol: str) -> Optional[float]:
         self._ensure_connected()
         try:
-            is_futures = ":USDT" in symbol
+            is_futures = ":USDT" in symbol and self._futures is not None
             exchange = self._futures if is_futures else self._spot
+
+            if self._testnet:
+                # Demo: use direct ticker endpoint to avoid market type issues
+                pair_id = symbol.replace("/", "")
+                result = await self._run_sync(
+                    lambda: self._spot.publicGetTickerPrice({"symbol": pair_id})
+                )
+                return float(result.get("price", 0))
+
             ticker = await self._run_sync(exchange.fetch_ticker, symbol)
             return float(ticker.get("last", 0))
         except Exception as e:
@@ -219,6 +273,8 @@ class BinanceBroker(BaseBroker):
 
     async def get_funding_rate(self, symbol: str) -> Optional[FundingRateInfo]:
         self._ensure_connected()
+        if not self._futures:
+            return None
         try:
             result = await self._run_sync(
                 self._futures.fetch_funding_rate, symbol
@@ -237,6 +293,8 @@ class BinanceBroker(BaseBroker):
     ) -> list[dict]:
         """Fetch historical funding rates."""
         self._ensure_connected()
+        if not self._futures:
+            return []
         try:
             result = await self._run_sync(
                 self._futures.fetch_funding_rate_history,
