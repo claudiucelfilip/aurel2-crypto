@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurel2-Crypto Dashboard</title>
     <meta http-equiv="refresh" content="60">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <style>
         :root {
             --bg: #0f172a;
@@ -24,7 +25,7 @@
         h1 { font-size: 1.5rem; margin-bottom: 20px; }
         h1 span { color: var(--accent); }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
-        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
         .card-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
         .card-value { font-size: 1.5rem; font-weight: 600; }
         .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
@@ -40,6 +41,11 @@
         .badge-buy, .badge-momentum_buy, .badge-carry_entry { background: rgba(34,197,94,0.15); color: var(--green); }
         .badge-sell, .badge-momentum_sell, .badge-carry_exit { background: rgba(239,68,68,0.15); color: var(--red); }
         .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; background: rgba(139,92,246,0.15); color: var(--accent); margin-right: 4px; }
+        .chart-container { position: relative; height: 400px; }
+        .chart-stats { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
+        .chart-stat { text-align: center; }
+        .chart-stat-value { font-size: 1.2rem; font-weight: 600; }
+        .chart-stat-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
         .footer { text-align: center; color: var(--text-muted); font-size: 0.75rem; margin-top: 40px; }
     </style>
 </head>
@@ -48,7 +54,6 @@
         <h1><span>Aurel2</span>-Crypto</h1>
 
         <div class="grid">
-            <!-- Daemon Status -->
             <div class="card">
                 <div class="card-label">Daemon Status</div>
                 <div class="card-value">
@@ -70,7 +75,6 @@
                 {% endif %}
             </div>
 
-            <!-- Momentum Strategy -->
             <div class="card">
                 <div class="card-label">Momentum (70%)</div>
                 <div class="card-value">
@@ -88,7 +92,6 @@
                 </div>
             </div>
 
-            <!-- Carry Strategy -->
             <div class="card">
                 <div class="card-label">Carry (30%)</div>
                 <div class="card-value">
@@ -106,7 +109,6 @@
                 </div>
             </div>
 
-            <!-- Connection -->
             <div class="card">
                 <div class="card-label">Exchange</div>
                 <div class="card-value">
@@ -119,7 +121,37 @@
             </div>
         </div>
 
-        <!-- Trade Activity -->
+        {% if chart_data %}
+        <div class="card">
+            <div class="card-label" style="margin-bottom: 12px;">Backtest Performance ({{ chart_data.summary.start_date }} to {{ chart_data.summary.end_date }})</div>
+            <div class="chart-container">
+                <canvas id="backtestChart"></canvas>
+            </div>
+            <div class="chart-stats">
+                <div class="chart-stat">
+                    <div class="chart-stat-value positive">${{ "{:,.0f}".format(chart_data.summary.combined_final) }}</div>
+                    <div class="chart-stat-label">Combined Final</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">${{ "{:,.0f}".format(chart_data.summary.momentum_final) }}</div>
+                    <div class="chart-stat-label">Momentum ({{ chart_data.summary.momentum_cagr }}% CAGR)</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">${{ "{:,.0f}".format(chart_data.summary.carry_final) }}</div>
+                    <div class="chart-stat-label">Carry ({{ chart_data.summary.carry_cagr }}% CAGR)</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.0f}".format(chart_data.summary.btc_final) }}</div>
+                    <div class="chart-stat-label">BTC Buy & Hold</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value positive">+{{ "{:,.0f}".format(chart_data.summary.combined_final - chart_data.summary.btc_final) }}</div>
+                    <div class="chart-stat-label">Alpha vs BTC</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card">
             <div class="card-label" style="margin-bottom: 12px;">Recent Activity</div>
             {% if trades %}
@@ -154,5 +186,87 @@
             Aurel2-Crypto &middot; Auto-refreshes every 60s
         </div>
     </div>
+
+    {% if chart_data %}
+    <script>
+        const chartData = {{ chart_data | tojson }};
+
+        const ctx = document.getElementById('backtestChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.dates,
+                datasets: [
+                    {
+                        label: 'Combined (30/70)',
+                        data: chartData.combined,
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        fill: true,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1,
+                    },
+                    {
+                        label: 'Momentum Only',
+                        data: chartData.momentum,
+                        borderColor: '#22c55e',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        borderDash: [4, 2],
+                    },
+                    {
+                        label: 'BTC Buy & Hold',
+                        data: chartData.btc_benchmark,
+                        borderColor: '#f97316',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        borderDash: [6, 3],
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#94a3b8', font: { size: 11 } },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString();
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            color: '#94a3b8',
+                            maxTicksLimit: 12,
+                            font: { size: 10 },
+                        },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' },
+                    },
+                    y: {
+                        ticks: {
+                            color: '#94a3b8',
+                            font: { size: 10 },
+                            callback: function(val) { return '$' + val.toLocaleString(); },
+                        },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' },
+                    },
+                },
+            },
+        });
+    </script>
+    {% endif %}
 </body>
 </html>

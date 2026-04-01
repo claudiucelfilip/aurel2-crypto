@@ -16,6 +16,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 DATA_DIR = Path.home() / ".aurel2-crypto"
 HEARTBEAT_FILE = DATA_DIR / "heartbeat.json"
 TRADE_JOURNAL_FILE = DATA_DIR / "trade_journal.json"
+CHART_DATA_FILE = DATA_DIR / "chart_data.json"
 
 
 def get_heartbeat() -> dict | None:
@@ -53,6 +54,13 @@ async def dashboard(request: Request):
                 carry_active.append(asset.upper())
         momentum_holding = heartbeat.get("momentum_holding")
 
+    chart_data = None
+    if CHART_DATA_FILE.exists():
+        try:
+            chart_data = json.loads(CHART_DATA_FILE.read_text())
+        except Exception:
+            pass
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -61,6 +69,7 @@ async def dashboard(request: Request):
             "trades": trades,
             "carry_active": carry_active,
             "momentum_holding": momentum_holding,
+            "chart_data": chart_data,
         },
     )
 
@@ -73,3 +82,13 @@ async def api_status():
 @app.get("/api/trades")
 async def api_trades(limit: int = 50):
     return get_trade_journal(limit)
+
+
+@app.get("/api/chart")
+async def api_chart():
+    if not CHART_DATA_FILE.exists():
+        return {"error": "No chart data. Run generate_chart_data.py first."}
+    try:
+        return json.loads(CHART_DATA_FILE.read_text())
+    except Exception:
+        return {"error": "Failed to load chart data"}
