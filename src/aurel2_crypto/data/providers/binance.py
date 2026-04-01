@@ -148,7 +148,7 @@ class BinanceDataProvider:
 
         df = pd.DataFrame([
             {
-                "timestamp": pd.Timestamp(r["datetime"]),
+                "timestamp": pd.Timestamp(r["datetime"]).tz_localize(None),
                 "symbol": symbol,
                 "funding_rate": float(r.get("fundingRate", 0)),
             }
