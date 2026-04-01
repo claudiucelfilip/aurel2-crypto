@@ -53,13 +53,16 @@ async def dashboard(request: Request):
                 carry_active.append(asset.upper())
         momentum_holding = heartbeat.get("momentum_holding")
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "heartbeat": heartbeat,
-        "trades": trades,
-        "carry_active": carry_active,
-        "momentum_holding": momentum_holding,
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard.html",
+        context={
+            "heartbeat": heartbeat,
+            "trades": trades,
+            "carry_active": carry_active,
+            "momentum_holding": momentum_holding,
+        },
+    )
 
 
 @app.get("/api/status")

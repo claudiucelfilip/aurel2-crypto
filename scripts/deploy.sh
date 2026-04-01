@@ -18,7 +18,7 @@ rsync -a --delete \
     --exclude='.git' \
     --exclude='.venv' \
     --exclude='__pycache__' \
-    --exclude='data/' \
+    --exclude='/data/' \
     --exclude='.env' \
     "$SOURCE_DIR/" "$DEPLOY_DIR/"
 
