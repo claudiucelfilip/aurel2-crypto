@@ -123,13 +123,14 @@ def run_combined_backtest(
     carry_pct: float = 0.50,
     momentum_pct: float = 0.50,
     momentum_lookback: int = 28,
+    regime_detector=None,
 ) -> CombinedBacktestResult:
     """Run carry + momentum as a combined portfolio."""
 
     carry_capital = initial_capital * carry_pct
     momentum_capital = initial_capital * momentum_pct
 
-    # Run carry backtest
+    # Run carry backtest (carry is market-neutral, regime doesn't affect it)
     carry_engine = CarryBacktestEngine(
         initial_capital=carry_capital,
         entry_rate=0.0001,
@@ -138,7 +139,7 @@ def run_combined_backtest(
     )
     carry_result = carry_engine.run(funding_rates, prices, start_date, end_date)
 
-    # Run momentum backtest
+    # Run momentum backtest (regime overlay scales position sizing)
     momentum_strategy = ShortTermMomentumStrategy(
         lookback_days=momentum_lookback,
         rebalance_days=7,
@@ -148,7 +149,10 @@ def run_combined_backtest(
         initial_capital=momentum_capital,
         transaction_cost_pct=0.001,
     )
-    momentum_result = momentum_engine.run(momentum_strategy, prices, start_date, end_date)
+    momentum_result = momentum_engine.run(
+        momentum_strategy, prices, start_date, end_date,
+        regime_detector=regime_detector,
+    )
 
     # Build combined equity curve (weekly snapshots from momentum, interpolate carry)
     # Use momentum snapshots as the time axis since it's weekly

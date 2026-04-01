@@ -174,6 +174,7 @@ class BacktestEngine:
         prices: pd.DataFrame,
         start_date: date,
         end_date: date,
+        regime_detector=None,
     ) -> BacktestResult:
         """Run a backtest for a single strategy.
 
@@ -182,6 +183,7 @@ class BacktestEngine:
             prices: Historical OHLCV data with columns: timestamp, close, symbol
             start_date: Backtest start date
             end_date: Backtest end date
+            regime_detector: Optional RegimeDetector for position sizing overlay
         """
         rebalance_dates = strategy.get_rebalance_dates(start_date, end_date)
         if not rebalance_dates:
@@ -246,15 +248,25 @@ class BacktestEngine:
                                 commission=fee,
                             ))
 
-                    # Buy new target
+                    # Buy new target (apply regime overlay if available)
                     buy_asset = ASSET_REGISTRY[target]
                     buy_price = self._get_price(prices, buy_asset.symbol, calc_date)
                     if buy_price and float(cash) > 0:
                         available = float(cash)
-                        fee = available * self.transaction_cost_pct
-                        buy_amount = available - fee
+                        # Regime overlay: scale position by multiplier
+                        if regime_detector:
+                            regime = regime_detector.detect_regime(prices, calc_date)
+                            multiplier = regime["position_multiplier"]
+                            deploy = available * min(multiplier, 1.0)
+                            # Excess cash held as buffer (multiplier > 1 uses all cash)
+                            if multiplier >= 1.0:
+                                deploy = available
+                        else:
+                            deploy = available
+                        fee = deploy * self.transaction_cost_pct
+                        buy_amount = deploy - fee
                         shares = Decimal(str(buy_amount / buy_price))
-                        cash = Decimal("0")
+                        cash = Decimal(str(available - deploy))
                         current_holding = target
                         current_shares = shares
                         trades.append(Trade(
