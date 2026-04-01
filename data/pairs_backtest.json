@@ -1,0 +1,17 @@
+{
+  "strategy": "pairs_btc_eth",
+  "start_date": "2021-01-01",
+  "end_date": "2026-03-31",
+  "initial_capital": 10000.0,
+  "final_value": 5849.78,
+  "total_return_pct": -41.5,
+  "cagr_pct": -9.7,
+  "max_drawdown_pct": 42.4,
+  "sharpe_ratio": -0.8,
+  "num_trades": 34,
+  "win_rate": 64.7,
+  "avg_trade_pnl_pct": -1.47,
+  "avg_hold_days": 21.1,
+  "pct_time_in_trade": 37.4,
+  "benchmark_final": 23256.82
+}
