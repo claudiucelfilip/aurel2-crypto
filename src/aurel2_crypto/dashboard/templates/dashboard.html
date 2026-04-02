@@ -119,7 +119,7 @@
             <div class="chart-stats">
                 <div class="chart-stat">
                     <div class="chart-stat-value positive">${{ "{:,.0f}".format(chart_data.summary.momentum_final) }}</div>
-                    <div class="chart-stat-label">Momentum ({{ chart_data.summary.momentum_cagr }}% CAGR)</div>
+                    <div class="chart-stat-label">Final ({{ chart_data.summary.momentum_cagr }}% CAGR)</div>
                 </div>
                 <div class="chart-stat">
                     <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.0f}".format(chart_data.summary.btc_final) }}</div>
@@ -135,11 +135,11 @@
                 </div>
                 <div class="chart-stat">
                     <div class="chart-stat-value">{{ chart_data.summary.sharpe }}</div>
-                    <div class="chart-stat-label">Sharpe Ratio</div>
+                    <div class="chart-stat-label">Sharpe</div>
                 </div>
                 <div class="chart-stat">
-                    <div class="chart-stat-value">{{ chart_data.summary.num_trades }}</div>
-                    <div class="chart-stat-label">Trades</div>
+                    <div class="chart-stat-value">${{ "{:,.0f}".format(chart_data.summary.yield_earned) }}</div>
+                    <div class="chart-stat-label">USDT Yield ({{ chart_data.summary.pct_time_in_cash }}% idle)</div>
                 </div>
             </div>
         </div>
