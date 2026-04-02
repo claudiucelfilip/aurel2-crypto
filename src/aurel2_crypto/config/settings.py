@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     trading_mode: str = "paper"  # "paper" or "live"
     initial_capital: float = 10000.0
 
-    # Strategy allocation (must sum to 1.0)
-    carry_allocation: float = 0.10
-    momentum_allocation: float = 0.90
+    # Strategy allocation
+    carry_allocation: float = 0.0
+    momentum_allocation: float = 1.0
 
     # Momentum strategy
     momentum_lookback_days: int = 28

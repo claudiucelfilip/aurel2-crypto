@@ -76,7 +76,7 @@
             </div>
 
             <div class="card">
-                <div class="card-label">Momentum (90%)</div>
+                <div class="card-label">Momentum</div>
                 <div class="card-value">
                     {% if momentum_holding and momentum_holding != 'usdt' %}
                         {{ momentum_holding | upper }}
@@ -92,22 +92,6 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-label">Carry (10%)</div>
-                <div class="card-value">
-                    {% if carry_active %}
-                        {% for a in carry_active %}<span class="tag">{{ a }}</span>{% endfor %}
-                    {% else %}
-                        No active carry
-                    {% endif %}
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 4px;">
-                    Funding rate collection &middot; 8h checks
-                    {% if heartbeat and heartbeat.last_carry_check %}
-                        &middot; Last: {{ heartbeat.last_carry_check[:16] }}
-                    {% endif %}
-                </div>
-            </div>
 
             <div class="card">
                 <div class="card-label">Exchange</div>
@@ -129,24 +113,28 @@
             </div>
             <div class="chart-stats">
                 <div class="chart-stat">
-                    <div class="chart-stat-value positive">${{ "{:,.0f}".format(chart_data.summary.combined_final) }}</div>
-                    <div class="chart-stat-label">Combined Final</div>
-                </div>
-                <div class="chart-stat">
-                    <div class="chart-stat-value">${{ "{:,.0f}".format(chart_data.summary.momentum_final) }}</div>
+                    <div class="chart-stat-value positive">${{ "{:,.0f}".format(chart_data.summary.momentum_final) }}</div>
                     <div class="chart-stat-label">Momentum ({{ chart_data.summary.momentum_cagr }}% CAGR)</div>
-                </div>
-                <div class="chart-stat">
-                    <div class="chart-stat-value">${{ "{:,.0f}".format(chart_data.summary.carry_final) }}</div>
-                    <div class="chart-stat-label">Carry ({{ chart_data.summary.carry_cagr }}% CAGR)</div>
                 </div>
                 <div class="chart-stat">
                     <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.0f}".format(chart_data.summary.btc_final) }}</div>
                     <div class="chart-stat-label">BTC Buy & Hold</div>
                 </div>
                 <div class="chart-stat">
-                    <div class="chart-stat-value positive">+{{ "{:,.0f}".format(chart_data.summary.combined_final - chart_data.summary.btc_final) }}</div>
+                    <div class="chart-stat-value positive">+${{ "{:,.0f}".format(chart_data.summary.momentum_final - chart_data.summary.btc_final) }}</div>
                     <div class="chart-stat-label">Alpha vs BTC</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">{{ chart_data.summary.max_drawdown }}%</div>
+                    <div class="chart-stat-label">Max Drawdown</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">{{ chart_data.summary.sharpe }}</div>
+                    <div class="chart-stat-label">Sharpe Ratio</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">{{ chart_data.summary.num_trades }}</div>
+                    <div class="chart-stat-label">Trades</div>
                 </div>
             </div>
         </div>
@@ -198,8 +186,8 @@
                 labels: chartData.dates,
                 datasets: [
                     {
-                        label: 'Combined (10/90)',
-                        data: chartData.combined,
+                        label: 'Aurel2-Crypto Momentum',
+                        data: chartData.momentum,
                         borderColor: '#8b5cf6',
                         backgroundColor: 'rgba(139, 92, 246, 0.1)',
                         fill: true,
@@ -208,22 +196,13 @@
                         tension: 0.1,
                     },
                     {
-                        label: 'Momentum Only',
-                        data: chartData.momentum,
-                        borderColor: '#22c55e',
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        tension: 0.1,
-                        borderDash: [4, 2],
-                    },
-                    {
                         label: 'BTC Buy & Hold',
                         data: chartData.btc_benchmark,
                         borderColor: '#f97316',
                         borderWidth: 1.5,
                         pointRadius: 0,
                         tension: 0.1,
-                        borderDash: [6, 3],
+                        borderDash: [5, 3],
                     },
                 ],
             },

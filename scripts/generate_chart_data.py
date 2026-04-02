@@ -7,10 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from aurel2_crypto.core.assets import CARRY_ASSETS, ASSET_REGISTRY, get_all_symbols
+from aurel2_crypto.core.assets import get_all_symbols
 from aurel2_crypto.data.providers.binance import BinanceDataProvider
 from aurel2_crypto.engine.backtest import BacktestEngine
-from aurel2_crypto.engine.backtest_carry import CarryBacktestEngine
 from aurel2_crypto.strategies.momentum import ShortTermMomentumStrategy
 
 
@@ -25,25 +24,11 @@ def main():
         symbols=get_all_symbols(), timeframe="1d",
         start_date=datetime(2020, 12, 1), end_date=datetime(2026, 3, 31),
     )
-    perp_symbols = [ASSET_REGISTRY[a].perp_symbol for a in CARRY_ASSETS]
-    funding_rates = provider.get_multi_funding_rates(
-        symbols=perp_symbols,
-        start_date=datetime(2021, 1, 1), end_date=datetime(2026, 3, 31),
-    )
-
-    mom_pct = 0.90
-    carry_pct = 0.10
-
-    # Momentum equity curve
+    # Momentum equity curve (100% allocation)
     print("Running momentum backtest...")
     mom_strategy = ShortTermMomentumStrategy(lookback_days=28, rebalance_days=7, switch_threshold=0.03)
-    mom_engine = BacktestEngine(initial_capital=capital * mom_pct, transaction_cost_pct=0.001)
+    mom_engine = BacktestEngine(initial_capital=capital, transaction_cost_pct=0.001)
     mom_result = mom_engine.run(mom_strategy, prices, start, end)
-
-    # Carry equity curve
-    print("Running carry backtest...")
-    carry_engine = CarryBacktestEngine(initial_capital=capital * carry_pct, entry_rate=0.0001, exit_rate=-0.0001, position_pct=0.90)
-    carry_result = carry_engine.run(funding_rates, prices, start, end)
 
     # BTC benchmark
     btc_prices = prices[prices["symbol"] == "BTC/USDT"].copy()
@@ -52,54 +37,40 @@ def main():
     btc_start_price = float(btc_prices[btc_prices["date"] <= start].iloc[-1]["close"])
     btc_shares = (capital * 0.999) / btc_start_price
 
-    # Build combined equity curve (weekly snapshots)
-    carry_daily_rate = (carry_result.final_value / (capital * carry_pct)) ** (1 / max((end - start).days, 1)) - 1
-
     chart_data = {
         "dates": [],
         "momentum": [],
-        "combined": [],
         "btc_benchmark": [],
     }
-
-    # Normalize momentum to $10k base for chart comparability
-    mom_start_capital = capital * mom_pct
-    mom_scale = capital / mom_start_capital  # Scale factor to normalize to $10k
 
     for snap in mom_result.snapshots:
         d = snap.date
         mom_val = float(snap.total_value)
-        days_elapsed = (d - start).days
-        carry_val = (capital * carry_pct) * (1 + carry_daily_rate) ** days_elapsed
-        combined_val = mom_val + carry_val
 
-        # BTC benchmark
         btc_row = btc_prices[btc_prices["date"] <= d]
         btc_price = float(btc_row.iloc[-1]["close"]) if not btc_row.empty else btc_start_price
         btc_val = btc_shares * btc_price
 
         chart_data["dates"].append(str(d))
-        chart_data["momentum"].append(round(mom_val * mom_scale, 2))  # Normalized to $10k
-        chart_data["combined"].append(round(combined_val, 2))
+        chart_data["momentum"].append(round(mom_val, 2))
         chart_data["btc_benchmark"].append(round(btc_val, 2))
 
-    # Summary stats
     chart_data["summary"] = {
         "start_date": str(start),
         "end_date": str(end),
         "initial_capital": capital,
-        "momentum_final": round(mom_result.final_value * mom_scale, 2),
+        "momentum_final": round(mom_result.final_value, 2),
         "momentum_cagr": round(mom_result.cagr * 100, 1),
-        "carry_final": round(carry_result.final_value, 2),
-        "carry_cagr": round(carry_result.cagr * 100, 1),
-        "combined_final": round(mom_result.final_value + carry_result.final_value, 2),
+        "max_drawdown": round(mom_result.max_drawdown * 100, 1),
+        "sharpe": round(mom_result.sharpe_ratio, 2),
+        "num_trades": mom_result.num_trades,
         "btc_final": round(chart_data["btc_benchmark"][-1], 2),
     }
 
     out_path = Path(__file__).parent.parent / "data" / "chart_data.json"
     out_path.write_text(json.dumps(chart_data))
     print(f"Saved {len(chart_data['dates'])} data points to {out_path}")
-    print(f"Combined final: ${chart_data['summary']['combined_final']:,.2f}")
+    print(f"Momentum final: ${chart_data['summary']['momentum_final']:,.2f}")
     print(f"BTC final: ${chart_data['summary']['btc_final']:,.2f}")
 
 
