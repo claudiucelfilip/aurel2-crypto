@@ -62,6 +62,10 @@ def main():
         "btc_benchmark": [],
     }
 
+    # Normalize momentum to $10k base for chart comparability
+    mom_start_capital = capital * mom_pct
+    mom_scale = capital / mom_start_capital  # Scale factor to normalize to $10k
+
     for snap in mom_result.snapshots:
         d = snap.date
         mom_val = float(snap.total_value)
@@ -75,7 +79,7 @@ def main():
         btc_val = btc_shares * btc_price
 
         chart_data["dates"].append(str(d))
-        chart_data["momentum"].append(round(mom_val, 2))
+        chart_data["momentum"].append(round(mom_val * mom_scale, 2))  # Normalized to $10k
         chart_data["combined"].append(round(combined_val, 2))
         chart_data["btc_benchmark"].append(round(btc_val, 2))
 
@@ -84,7 +88,7 @@ def main():
         "start_date": str(start),
         "end_date": str(end),
         "initial_capital": capital,
-        "momentum_final": round(mom_result.final_value, 2),
+        "momentum_final": round(mom_result.final_value * mom_scale, 2),
         "momentum_cagr": round(mom_result.cagr * 100, 1),
         "carry_final": round(carry_result.final_value, 2),
         "carry_cagr": round(carry_result.cagr * 100, 1),

@@ -76,7 +76,7 @@
             </div>
 
             <div class="card">
-                <div class="card-label">Momentum (70%)</div>
+                <div class="card-label">Momentum (90%)</div>
                 <div class="card-value">
                     {% if momentum_holding and momentum_holding != 'usdt' %}
                         {{ momentum_holding | upper }}
@@ -93,7 +93,7 @@
             </div>
 
             <div class="card">
-                <div class="card-label">Carry (30%)</div>
+                <div class="card-label">Carry (10%)</div>
                 <div class="card-value">
                     {% if carry_active %}
                         {% for a in carry_active %}<span class="tag">{{ a }}</span>{% endfor %}
@@ -198,7 +198,7 @@
                 labels: chartData.dates,
                 datasets: [
                     {
-                        label: 'Combined (30/70)',
+                        label: 'Combined (10/90)',
                         data: chartData.combined,
                         borderColor: '#8b5cf6',
                         backgroundColor: 'rgba(139, 92, 246, 0.1)',
