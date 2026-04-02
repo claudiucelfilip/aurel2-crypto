@@ -20,6 +20,7 @@ from aurel2_crypto.broker.binance import BinanceBroker
 from aurel2_crypto.config.settings import Settings
 from aurel2_crypto.core.assets import ASSET_REGISTRY, CARRY_ASSETS, MOMENTUM_ASSETS, get_all_symbols
 from aurel2_crypto.broker.base import BrokerOrder
+from aurel2_crypto.broker.earn import BinanceEarn
 from aurel2_crypto.core.models import CryptoAsset, SignalAction
 from aurel2_crypto.data.providers.binance import BinanceDataProvider
 from aurel2_crypto.data.momentum import calculate_momentum_scores, rank_by_momentum
@@ -62,6 +63,7 @@ class CryptoDaemon:
         self._carry_positions: dict[CryptoAsset, bool] = {a: False for a in CARRY_ASSETS}
         self._high_water_mark: float = 0.0
         self._trailing_stop_pct = settings.trailing_stop_pct
+        self._earn: BinanceEarn | None = None  # Initialized after broker connects
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._load_state()
@@ -100,6 +102,11 @@ class CryptoDaemon:
         if not connected:
             logger.error("broker_connection_failed")
             return
+
+        # Initialize Flexible Earn (live only — demo API doesn't support /sapi/)
+        if not self.settings.binance_testnet and self.broker._spot:
+            self._earn = BinanceEarn(self.broker._spot)
+            logger.info("earn_initialized")
 
         if self.notifier:
             mode = "TESTNET" if self.settings.binance_testnet else "LIVE"
@@ -379,10 +386,21 @@ class CryptoDaemon:
         )
         if self.notifier and result.status == "FILLED":
             self.notifier.send_trade("SELL", symbol, result.avg_fill_price, reasoning)
+
+        # Subscribe idle USDT to Flexible Earn
+        if self._earn and result.status == "FILLED":
+            summary = await self.broker.get_account_summary()
+            if summary.cash_balance > 10:
+                await self._earn.subscribe_usdt(summary.cash_balance - 1)  # Keep $1 buffer
+
         return result
 
     async def _buy_with_available(self, symbol: str, action: str, reasoning: str):
         """Buy as much as possible of a symbol with available USDT."""
+        # Redeem from Flexible Earn first
+        if self._earn:
+            await self._earn.redeem_all()
+
         summary = await self.broker.get_account_summary()
         available = summary.cash_balance * 0.995  # Reserve 0.5% for fees
 
@@ -443,6 +461,7 @@ class CryptoDaemon:
                 "momentum_holding": self._current_momentum_holding.value if self._current_momentum_holding else None,
                 "high_water_mark": self._high_water_mark,
                 "trailing_stop_pct": self._trailing_stop_pct,
+                "earn_active": self._earn is not None and self._earn._subscribed,
                 "carry_positions": {k.value: v for k, v in self._carry_positions.items()},
             }
             try:
