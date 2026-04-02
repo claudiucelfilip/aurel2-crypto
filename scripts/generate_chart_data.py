@@ -31,15 +31,18 @@ def main():
         start_date=datetime(2021, 1, 1), end_date=datetime(2026, 3, 31),
     )
 
+    mom_pct = 0.90
+    carry_pct = 0.10
+
     # Momentum equity curve
     print("Running momentum backtest...")
     mom_strategy = ShortTermMomentumStrategy(lookback_days=28, rebalance_days=7, switch_threshold=0.03)
-    mom_engine = BacktestEngine(initial_capital=capital * 0.70, transaction_cost_pct=0.001)
+    mom_engine = BacktestEngine(initial_capital=capital * mom_pct, transaction_cost_pct=0.001)
     mom_result = mom_engine.run(mom_strategy, prices, start, end)
 
     # Carry equity curve
     print("Running carry backtest...")
-    carry_engine = CarryBacktestEngine(initial_capital=capital * 0.30, entry_rate=0.0001, exit_rate=-0.0001, position_pct=0.90)
+    carry_engine = CarryBacktestEngine(initial_capital=capital * carry_pct, entry_rate=0.0001, exit_rate=-0.0001, position_pct=0.90)
     carry_result = carry_engine.run(funding_rates, prices, start, end)
 
     # BTC benchmark
@@ -50,7 +53,7 @@ def main():
     btc_shares = (capital * 0.999) / btc_start_price
 
     # Build combined equity curve (weekly snapshots)
-    carry_daily_rate = (carry_result.final_value / (capital * 0.30)) ** (1 / max((end - start).days, 1)) - 1
+    carry_daily_rate = (carry_result.final_value / (capital * carry_pct)) ** (1 / max((end - start).days, 1)) - 1
 
     chart_data = {
         "dates": [],
@@ -63,7 +66,7 @@ def main():
         d = snap.date
         mom_val = float(snap.total_value)
         days_elapsed = (d - start).days
-        carry_val = (capital * 0.30) * (1 + carry_daily_rate) ** days_elapsed
+        carry_val = (capital * carry_pct) * (1 + carry_daily_rate) ** days_elapsed
         combined_val = mom_val + carry_val
 
         # BTC benchmark
