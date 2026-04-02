@@ -133,7 +133,11 @@ class CryptoDaemon:
                     await self._run_carry_check(now)
                     self._last_carry_check = now
 
-                # Momentum: check on Mondays
+                # Daily filter: exit if all coins negative (Tue-Sun)
+                if self._should_check_daily_filter(now):
+                    await self._run_daily_filter(now)
+
+                # Momentum: full rebalance on Mondays
                 if self._should_check_momentum(now):
                     await self._run_momentum_check(now)
                     self._last_momentum_check = now.date()
@@ -155,11 +159,25 @@ class CryptoDaemon:
 
     def _should_check_momentum(self, now: datetime) -> bool:
         today = now.date()
-        if today.weekday() != 0:  # Monday only
+        if today.weekday() != 0:  # Monday only for full rebalance
             return False
         if self._last_momentum_check == today:
             return False
         return now.hour >= 0  # Any time on Monday
+
+    def _should_check_daily_filter(self, now: datetime) -> bool:
+        """Daily absolute momentum check — exit if all coins negative."""
+        if not self._current_momentum_holding:
+            return False
+        if self._current_momentum_holding == CryptoAsset.USDT:
+            return False
+        # Run once per day (not on Mondays — momentum check handles that)
+        today = now.date()
+        if today.weekday() == 0:
+            return False
+        if self._last_momentum_check == today:
+            return False
+        return now.hour >= 1  # After 01:00 UTC
 
     async def _run_carry_check(self, now: datetime):
         """Check funding rates and manage carry positions."""
@@ -246,6 +264,44 @@ class CryptoDaemon:
             await self._sell_position(asset.symbol, "stop_loss", reasoning)
             self._current_momentum_holding = CryptoAsset.USDT
             self._high_water_mark = 0.0
+
+    async def _run_daily_filter(self, now: datetime):
+        """Daily absolute momentum check — exit to USDT if all coins trending down."""
+        logger.info("daily_filter_check")
+
+        prices = self.data_provider.get_multi_ohlcv(
+            symbols=get_all_symbols(),
+            timeframe="1d",
+            start_date=datetime.utcnow() - timedelta(days=60),
+            end_date=datetime.utcnow(),
+        )
+        if prices.empty:
+            return
+
+        scores = calculate_momentum_scores(
+            prices, MOMENTUM_ASSETS, now.date(), self.settings.momentum_lookback_days,
+        )
+        if not scores:
+            return
+
+        all_negative = all(s.momentum <= 0 for s in scores.values())
+        if all_negative:
+            reasoning = (
+                f"DAILY EXIT: all momentum negative. "
+                + ", ".join(f"{k.value}={v.momentum:+.1%}" for k, v in scores.items())
+            )
+            logger.warning("daily_filter_triggered", reasoning=reasoning)
+
+            await self._sell_position(
+                ASSET_REGISTRY[self._current_momentum_holding].symbol,
+                "daily_exit", reasoning,
+            )
+            self._current_momentum_holding = CryptoAsset.USDT
+            self._high_water_mark = 0.0
+        else:
+            logger.info("daily_filter_ok", holding=self._current_momentum_holding.value)
+
+        self._last_momentum_check = now.date()
 
     async def _run_momentum_check(self, now: datetime):
         """Run weekly momentum rebalance."""
