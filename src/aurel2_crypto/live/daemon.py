@@ -19,6 +19,7 @@ import structlog
 from aurel2_crypto.broker.binance import BinanceBroker
 from aurel2_crypto.config.settings import Settings
 from aurel2_crypto.core.assets import ASSET_REGISTRY, CARRY_ASSETS, MOMENTUM_ASSETS, get_all_symbols
+from aurel2_crypto.broker.base import BrokerOrder
 from aurel2_crypto.core.models import CryptoAsset, SignalAction
 from aurel2_crypto.data.providers.binance import BinanceDataProvider
 from aurel2_crypto.data.momentum import calculate_momentum_scores, rank_by_momentum
@@ -63,6 +64,28 @@ class CryptoDaemon:
         self._trailing_stop_pct = settings.trailing_stop_pct
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self._load_state()
+
+    def _load_state(self):
+        """Restore state from trade journal and heartbeat on restart."""
+        # Try heartbeat first (has current holding + HWM)
+        if HEARTBEAT_FILE.exists():
+            try:
+                hb = json.loads(HEARTBEAT_FILE.read_text())
+                holding = hb.get("momentum_holding")
+                if holding and holding != "usdt":
+                    for ca in CryptoAsset:
+                        if ca.value == holding:
+                            self._current_momentum_holding = ca
+                            break
+                self._high_water_mark = hb.get("high_water_mark", 0.0)
+                logger.info(
+                    "state_restored",
+                    holding=self._current_momentum_holding.value if self._current_momentum_holding else None,
+                    hwm=self._high_water_mark,
+                )
+            except Exception as e:
+                logger.warning("state_restore_failed", error=str(e))
 
     async def start(self):
         """Start the daemon."""
@@ -219,8 +242,8 @@ class CryptoDaemon:
                     tags=["rotating_light", "chart_with_downwards_trend"],
                 )
 
-            # TODO: execute actual sell order via broker
-            # For now, update state (testnet doesn't execute real trades yet)
+            # Execute sell
+            await self._sell_position(asset.symbol, "stop_loss", reasoning)
             self._current_momentum_holding = CryptoAsset.USDT
             self._high_water_mark = 0.0
 
@@ -257,27 +280,81 @@ class CryptoDaemon:
 
         target = signal.asset_id
         if target and target != self._current_momentum_holding:
-            # Execute the switch
+            # Sell current holding
             if self._current_momentum_holding and self._current_momentum_holding != CryptoAsset.USDT:
-                old_asset = ASSET_REGISTRY[self._current_momentum_holding]
-                price = await self.broker.get_market_price(old_asset.symbol)
-                logger.info("momentum_sell", symbol=old_asset.symbol, price=price)
-                self._record_trade("momentum_sell", old_asset.symbol, price or 0, signal.reasoning)
-                if self.notifier and price:
-                    self.notifier.send_trade("SELL", old_asset.symbol, price, signal.reasoning)
+                await self._sell_position(
+                    ASSET_REGISTRY[self._current_momentum_holding].symbol,
+                    "momentum_sell", signal.reasoning,
+                )
 
+            # Buy new target
             if target != CryptoAsset.USDT:
-                new_asset = ASSET_REGISTRY[target]
-                price = await self.broker.get_market_price(new_asset.symbol)
-                logger.info("momentum_buy", symbol=new_asset.symbol, price=price)
-                self._record_trade("momentum_buy", new_asset.symbol, price or 0, signal.reasoning)
-                if self.notifier and price:
-                    self.notifier.send_trade("BUY", new_asset.symbol, price, signal.reasoning)
-                self._high_water_mark = price or 0.0
+                buy_result = await self._buy_with_available(
+                    ASSET_REGISTRY[target].symbol,
+                    "momentum_buy", signal.reasoning,
+                )
+                if buy_result and buy_result.avg_fill_price > 0:
+                    self._high_water_mark = buy_result.avg_fill_price
+                else:
+                    self._high_water_mark = 0.0
             else:
                 self._high_water_mark = 0.0
 
             self._current_momentum_holding = target
+
+    async def _sell_position(self, symbol: str, action: str, reasoning: str):
+        """Sell entire position of a symbol."""
+        position = await self.broker.get_position(symbol)
+        if not position or position.shares <= 0:
+            logger.warning("sell_no_position", symbol=symbol)
+            return None
+
+        order = BrokerOrder(symbol=symbol, action="SELL", quantity=position.shares)
+        result = await self.broker.place_order(order)
+
+        logger.info(
+            "order_executed", action="SELL", symbol=symbol,
+            status=result.status, filled=result.filled_quantity,
+            price=result.avg_fill_price,
+        )
+        self._record_trade(
+            action, symbol, result.avg_fill_price,
+            f"{reasoning} | Sold {result.filled_quantity} @ ${result.avg_fill_price:,.2f}",
+        )
+        if self.notifier and result.status == "FILLED":
+            self.notifier.send_trade("SELL", symbol, result.avg_fill_price, reasoning)
+        return result
+
+    async def _buy_with_available(self, symbol: str, action: str, reasoning: str):
+        """Buy as much as possible of a symbol with available USDT."""
+        summary = await self.broker.get_account_summary()
+        available = summary.cash_balance * 0.995  # Reserve 0.5% for fees
+
+        price = await self.broker.get_market_price(symbol)
+        if not price or price <= 0:
+            logger.error("buy_no_price", symbol=symbol)
+            return None
+
+        quantity = available / price
+        if quantity <= 0:
+            logger.warning("buy_insufficient_funds", symbol=symbol, available=available)
+            return None
+
+        order = BrokerOrder(symbol=symbol, action="BUY", quantity=quantity)
+        result = await self.broker.place_order(order)
+
+        logger.info(
+            "order_executed", action="BUY", symbol=symbol,
+            status=result.status, filled=result.filled_quantity,
+            price=result.avg_fill_price,
+        )
+        self._record_trade(
+            action, symbol, result.avg_fill_price,
+            f"{reasoning} | Bought {result.filled_quantity} @ ${result.avg_fill_price:,.2f}",
+        )
+        if self.notifier and result.status == "FILLED":
+            self.notifier.send_trade("BUY", symbol, result.avg_fill_price, reasoning)
+        return result
 
     def _record_trade(self, action: str, symbol: str, price: float, reasoning: str):
         """Append trade to journal."""

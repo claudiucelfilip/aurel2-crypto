@@ -1,6 +1,8 @@
 """Binance exchange broker via ccxt."""
 
 import asyncio
+import math
+import time
 from typing import Optional
 
 import ccxt
@@ -199,45 +201,79 @@ class BinanceBroker(BaseBroker):
     async def place_order(self, order: BrokerOrder) -> OrderResult:
         self._ensure_connected()
 
-        is_futures = ":USDT" in order.symbol
-        exchange = self._futures if is_futures else self._spot
+        is_futures = ":USDT" in order.symbol and self._futures is not None
         side = "buy" if order.action == "BUY" else "sell"
 
         try:
-            params = {}
-            if is_futures and order.side == "short":
-                params["positionSide"] = "SHORT"
+            if self._testnet:
+                # Demo API: use raw privatePostOrder to avoid ccxt market type issues
+                pair_id = order.symbol.replace("/", "")
+                qty = self._round_lot_size(order.symbol, order.quantity)
+                if qty <= 0:
+                    raise ValueError(f"Quantity {order.quantity} rounds to 0 for {order.symbol}")
+                params = {
+                    "symbol": pair_id,
+                    "side": side.upper(),
+                    "type": "MARKET",
+                    "quantity": str(qty),
+                    "timestamp": int(time.time() * 1000),
+                }
+                result = await self._run_sync(
+                    lambda: self._spot.privatePostOrder(params)
+                )
 
-            result = await self._run_sync(
-                exchange.create_order,
-                order.symbol,
-                order.order_type,
-                side,
-                order.quantity,
-                order.limit_price,
-                params,
-            )
+                filled = float(result.get("executedQty", 0))
+                cum_quote = float(result.get("cummulativeQuoteQty", 0))
+                avg_price = cum_quote / filled if filled > 0 else 0
+                status = "FILLED" if result.get("status") == "FILLED" else "PARTIAL"
 
-            filled = float(result.get("filled", 0))
-            avg_price = float(result.get("average", 0) or 0)
-            fee_cost = 0.0
-            if result.get("fee"):
-                fee_cost = float(result["fee"].get("cost", 0))
+                return OrderResult(
+                    order_id=str(result.get("orderId", "")),
+                    symbol=order.symbol,
+                    action=order.action,
+                    quantity=order.quantity,
+                    filled_quantity=filled,
+                    avg_fill_price=avg_price,
+                    status=status,
+                    fee=cum_quote * 0.001,  # Estimate 0.1% fee
+                )
+            else:
+                # Live: use ccxt create_order
+                exchange = self._futures if is_futures else self._spot
+                params = {}
+                if is_futures and order.side == "short":
+                    params["positionSide"] = "SHORT"
 
-            status = "FILLED" if filled >= order.quantity * 0.99 else "PARTIAL"
-            if result.get("status") == "rejected":
-                status = "REJECTED"
+                result = await self._run_sync(
+                    exchange.create_order,
+                    order.symbol,
+                    order.order_type,
+                    side,
+                    order.quantity,
+                    order.limit_price,
+                    params,
+                )
 
-            return OrderResult(
-                order_id=str(result.get("id", "")),
-                symbol=order.symbol,
-                action=order.action,
-                quantity=order.quantity,
-                filled_quantity=filled,
-                avg_fill_price=avg_price,
-                status=status,
-                fee=fee_cost,
-            )
+                filled = float(result.get("filled", 0))
+                avg_price = float(result.get("average", 0) or 0)
+                fee_cost = 0.0
+                if result.get("fee"):
+                    fee_cost = float(result["fee"].get("cost", 0))
+
+                status = "FILLED" if filled >= order.quantity * 0.99 else "PARTIAL"
+                if result.get("status") == "rejected":
+                    status = "REJECTED"
+
+                return OrderResult(
+                    order_id=str(result.get("id", "")),
+                    symbol=order.symbol,
+                    action=order.action,
+                    quantity=order.quantity,
+                    filled_quantity=filled,
+                    avg_fill_price=avg_price,
+                    status=status,
+                    fee=fee_cost,
+                )
         except Exception as e:
             logger.error("order_failed", symbol=order.symbol, error=str(e))
             return OrderResult(
@@ -304,6 +340,17 @@ class BinanceBroker(BaseBroker):
         except Exception as e:
             logger.error("funding_history_failed", symbol=symbol, error=str(e))
             return []
+
+    def _round_lot_size(self, symbol: str, quantity: float) -> float:
+        """Round quantity down to valid lot size for the symbol."""
+        # Common lot sizes for major pairs
+        lot_sizes = {
+            "BTC": 5, "ETH": 4, "SOL": 2, "AVAX": 2, "LINK": 2,
+        }
+        base = symbol.split("/")[0] if "/" in symbol else symbol.replace("USDT", "")
+        decimals = lot_sizes.get(base, 2)
+        factor = 10 ** decimals
+        return math.floor(quantity * factor) / factor
 
     def _ensure_connected(self):
         if not self._connected:
