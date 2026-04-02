@@ -59,6 +59,8 @@ class CryptoDaemon:
         self._error_count = 0
         self._current_momentum_holding: CryptoAsset | None = None
         self._carry_positions: dict[CryptoAsset, bool] = {a: False for a in CARRY_ASSETS}
+        self._high_water_mark: float = 0.0
+        self._trailing_stop_pct = settings.trailing_stop_pct
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -99,6 +101,9 @@ class CryptoDaemon:
         while self._running:
             try:
                 now = datetime.utcnow()
+
+                # Trailing stop: check every cycle (every 5 min)
+                await self._check_trailing_stop()
 
                 # Carry: check every 8 hours
                 if self._should_check_carry(now):
@@ -166,6 +171,59 @@ class CryptoDaemon:
                 self._carry_positions[asset_id] = False
                 self._record_trade("carry_exit", asset_id.value, rate, f"Funding rate dropped to {rate:.4%}/8h")
 
+    async def _check_trailing_stop(self):
+        """Check trailing stop-loss every cycle (every 5 min)."""
+        if self._trailing_stop_pct <= 0:
+            return
+        if not self._current_momentum_holding:
+            return
+        if self._current_momentum_holding == CryptoAsset.USDT:
+            return
+
+        asset = ASSET_REGISTRY[self._current_momentum_holding]
+        price = await self.broker.get_market_price(asset.symbol)
+        if not price:
+            return
+
+        # Update high water mark
+        if price > self._high_water_mark:
+            self._high_water_mark = price
+
+        if self._high_water_mark <= 0:
+            return
+
+        drawdown = (self._high_water_mark - price) / self._high_water_mark
+        if drawdown >= self._trailing_stop_pct:
+            logger.warning(
+                "trailing_stop_triggered",
+                symbol=asset.symbol,
+                price=price,
+                hwm=self._high_water_mark,
+                drawdown=f"{drawdown:.1%}",
+                threshold=f"{self._trailing_stop_pct:.0%}",
+            )
+
+            # Execute sell
+            reasoning = (
+                f"STOP-LOSS: {asset.symbol} dropped {drawdown:.1%} from peak "
+                f"${self._high_water_mark:,.2f} → ${price:,.2f} "
+                f"(threshold: {self._trailing_stop_pct:.0%})"
+            )
+            self._record_trade("stop_loss", asset.symbol, price, reasoning)
+
+            if self.notifier:
+                self.notifier.send(
+                    message=reasoning,
+                    title=f"Crypto: STOP-LOSS {asset.symbol}",
+                    priority="high",
+                    tags=["rotating_light", "chart_with_downwards_trend"],
+                )
+
+            # TODO: execute actual sell order via broker
+            # For now, update state (testnet doesn't execute real trades yet)
+            self._current_momentum_holding = CryptoAsset.USDT
+            self._high_water_mark = 0.0
+
     async def _run_momentum_check(self, now: datetime):
         """Run weekly momentum rebalance."""
         logger.info("momentum_check_start")
@@ -215,6 +273,9 @@ class CryptoDaemon:
                 self._record_trade("momentum_buy", new_asset.symbol, price or 0, signal.reasoning)
                 if self.notifier and price:
                     self.notifier.send_trade("BUY", new_asset.symbol, price, signal.reasoning)
+                self._high_water_mark = price or 0.0
+            else:
+                self._high_water_mark = 0.0
 
             self._current_momentum_holding = target
 
@@ -247,6 +308,8 @@ class CryptoDaemon:
                 "last_carry_check": self._last_carry_check.isoformat() if self._last_carry_check else None,
                 "last_momentum_check": self._last_momentum_check.isoformat() if self._last_momentum_check else None,
                 "momentum_holding": self._current_momentum_holding.value if self._current_momentum_holding else None,
+                "high_water_mark": self._high_water_mark,
+                "trailing_stop_pct": self._trailing_stop_pct,
                 "carry_positions": {k.value: v for k, v in self._carry_positions.items()},
             }
             try:

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Momentum strategy
     momentum_lookback_days: int = 28
     momentum_rebalance_days: int = 7
+    trailing_stop_pct: float = 0.10  # 10% trailing stop-loss
 
     # Carry strategy
     carry_min_funding_rate: float = 0.0001  # 0.01% per 8h = ~10% annualized

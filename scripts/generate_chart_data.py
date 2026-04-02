@@ -27,7 +27,7 @@ def main():
     # Momentum equity curve (100% allocation)
     print("Running momentum backtest...")
     mom_strategy = ShortTermMomentumStrategy(lookback_days=28, rebalance_days=7, switch_threshold=0.03)
-    mom_engine = BacktestEngine(initial_capital=capital, transaction_cost_pct=0.001)
+    mom_engine = BacktestEngine(initial_capital=capital, transaction_cost_pct=0.001, trailing_stop_pct=0.10)
     mom_result = mom_engine.run(mom_strategy, prices, start, end)
 
     # BTC benchmark

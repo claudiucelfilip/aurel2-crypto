@@ -8,7 +8,7 @@ Adapted from Aurel2's backtest engine for 24/7 crypto markets:
 """
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -57,6 +57,7 @@ class BacktestResult:
             return
 
         values = [float(s.total_value) for s in self.snapshots]
+        dates = [s.date for s in self.snapshots]
         self.total_return = (self.final_value / self.initial_capital) - 1
 
         years = (self.end_date - self.start_date).days / 365.25
@@ -74,11 +75,13 @@ class BacktestResult:
                 max_dd = dd
         self.max_drawdown = max_dd
 
-        # Sharpe ratio (annualized, weekly periods)
+        # Sharpe ratio (annualized)
         if len(values) > 1:
             returns = pd.Series(values).pct_change().dropna()
             if len(returns) > 0 and returns.std() > 0:
-                periods_per_year = 52  # Weekly rebalance
+                # Detect frequency from snapshot spacing
+                avg_days = (dates[-1] - dates[0]).days / max(len(dates) - 1, 1)
+                periods_per_year = 365 / max(avg_days, 1)
                 self.sharpe_ratio = (
                     returns.mean() * periods_per_year
                 ) / (returns.std() * np.sqrt(periods_per_year))
@@ -163,10 +166,12 @@ class BacktestEngine:
         initial_capital: float = 10000.0,
         transaction_cost_pct: float = 0.001,
         benchmark_symbol: str = "BTC/USDT",
+        trailing_stop_pct: float = 0.0,
     ):
         self.initial_capital = initial_capital
         self.transaction_cost_pct = transaction_cost_pct
         self.benchmark_symbol = benchmark_symbol
+        self.trailing_stop_pct = trailing_stop_pct
 
     def run(
         self,
@@ -189,13 +194,78 @@ class BacktestEngine:
         if not rebalance_dates:
             raise ValueError("No rebalance dates generated")
 
+        # Build set of all trading days for daily stop-loss checks
+        rebalance_set = set(rebalance_dates)
+        all_days = []
+        if self.trailing_stop_pct > 0:
+            current = start_date
+            while current <= end_date:
+                all_days.append(current)
+                current += timedelta(days=1)
+        else:
+            all_days = rebalance_dates
+
         cash = Decimal(str(self.initial_capital))
         current_holding: CryptoAsset | None = None
         current_shares = Decimal("0")
         trades: list[Trade] = []
         snapshots: list[PortfolioSnapshot] = []
+        high_water_mark: float = 0.0
+        stop_triggered = False
 
-        for calc_date in rebalance_dates:
+        for calc_date in all_days:
+            is_rebalance = calc_date in rebalance_set
+
+            # Daily trailing stop-loss check
+            if (self.trailing_stop_pct > 0
+                    and current_holding
+                    and current_holding != CryptoAsset.USDT):
+                asset = ASSET_REGISTRY[current_holding]
+                price = self._get_price(prices, asset.symbol, calc_date)
+                if price:
+                    if price > high_water_mark:
+                        high_water_mark = price
+                    if high_water_mark > 0:
+                        drawdown = (high_water_mark - price) / high_water_mark
+                        if drawdown >= self.trailing_stop_pct:
+                            # Stop triggered — sell immediately
+                            proceeds = float(current_shares) * price
+                            fee = proceeds * self.transaction_cost_pct
+                            cash = Decimal(str(proceeds - fee))
+                            trades.append(Trade(
+                                date=calc_date,
+                                asset=asset,
+                                action=SignalAction.SELL,
+                                shares=current_shares,
+                                price=price,
+                                commission=fee,
+                            ))
+                            current_holding = CryptoAsset.USDT
+                            current_shares = Decimal("0")
+                            high_water_mark = 0.0
+                            stop_triggered = True
+
+            # Only run strategy on rebalance dates
+            if not is_rebalance:
+                # Still take daily snapshot if we have a stop-loss
+                if self.trailing_stop_pct > 0:
+                    total = cash
+                    positions = []
+                    if current_holding and current_holding != CryptoAsset.USDT:
+                        a = ASSET_REGISTRY[current_holding]
+                        p = self._get_price(prices, a.symbol, calc_date)
+                        if p:
+                            total += current_shares * Decimal(str(p))
+                            positions.append(Position(
+                                asset=a, shares=current_shares,
+                                entry_price=p, entry_date=calc_date, current_price=p,
+                            ))
+                    snapshots.append(PortfolioSnapshot(
+                        date=calc_date, cash=cash, positions=positions, total_value=total,
+                    ))
+                continue
+
+            stop_triggered = False
             signal = strategy.generate_signal(prices, calc_date, current_holding)
 
             # Get current price for portfolio valuation
@@ -269,6 +339,7 @@ class BacktestEngine:
                         cash = Decimal(str(available - deploy))
                         current_holding = target
                         current_shares = shares
+                        high_water_mark = buy_price  # Reset HWM on new position
                         trades.append(Trade(
                             date=calc_date,
                             asset=buy_asset,
