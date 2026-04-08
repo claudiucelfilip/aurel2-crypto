@@ -33,6 +33,11 @@ logger = structlog.get_logger()
 DATA_DIR = Path.home() / ".aurel2-crypto"
 HEARTBEAT_FILE = DATA_DIR / "heartbeat.json"
 TRADE_JOURNAL_FILE = DATA_DIR / "trade_journal.json"
+EQUITY_CURVE_FILE = DATA_DIR / "equity_curve.json"
+RUN_STATE_FILE = DATA_DIR / "run_state.json"
+
+# Equity snapshot interval (don't bloat the file — every 15 min is plenty)
+EQUITY_SNAPSHOT_INTERVAL_SEC = 900
 
 
 class CryptoDaemon:
@@ -448,9 +453,71 @@ class CryptoDaemon:
         journal.append(entry)
         TRADE_JOURNAL_FILE.write_text(json.dumps(journal, indent=2))
 
+    async def _compute_equity(self) -> float | None:
+        """Compute total account equity (USDT cash + market value of positions)."""
+        try:
+            summary = await self.broker.get_account_summary()
+            total = float(summary.total_value or 0)
+            # get_account_summary already includes spot USDT + futures total,
+            # but spot non-USDT holdings (e.g. ETH) need to be priced in.
+            positions = await self.broker.get_positions()
+            for p in positions:
+                # Only spot positions (futures already counted in futures_total)
+                if ":" not in p.symbol and p.market_value:
+                    total += float(p.market_value)
+            return total
+        except Exception as e:
+            logger.warning("equity_compute_failed", error=str(e))
+            return None
+
+    def _append_equity_snapshot(self, equity: float):
+        """Append an equity snapshot to the curve, downsampled to once per interval."""
+        now = time.time()
+        curve = []
+        if EQUITY_CURVE_FILE.exists():
+            try:
+                curve = json.loads(EQUITY_CURVE_FILE.read_text())
+            except Exception:
+                curve = []
+
+        if curve:
+            last_ts = curve[-1].get("timestamp", 0)
+            if now - last_ts < EQUITY_SNAPSHOT_INTERVAL_SEC:
+                return  # Too soon, skip
+
+        curve.append({
+            "timestamp": now,
+            "iso": datetime.utcnow().isoformat(),
+            "equity": round(equity, 2),
+            "holding": self._current_momentum_holding.value if self._current_momentum_holding else None,
+        })
+
+        # Cap at ~1 year of 15-min snapshots (~35k points). Trim to keep file sane.
+        if len(curve) > 40000:
+            curve = curve[-40000:]
+
+        try:
+            EQUITY_CURVE_FILE.write_text(json.dumps(curve))
+        except Exception as e:
+            logger.error("equity_curve_write_error", error=str(e))
+
+        # Initialize run state on first snapshot
+        if not RUN_STATE_FILE.exists():
+            try:
+                RUN_STATE_FILE.write_text(json.dumps({
+                    "started_at": datetime.utcnow().isoformat(),
+                    "started_timestamp": now,
+                    "starting_equity": round(equity, 2),
+                    "testnet": self.settings.binance_testnet,
+                }, indent=2))
+            except Exception as e:
+                logger.error("run_state_write_error", error=str(e))
+
     async def _heartbeat_writer(self):
         """Write heartbeat every 60 seconds."""
         while self._running:
+            equity = await self._compute_equity()
+
             heartbeat = {
                 "timestamp": time.time(),
                 "connected": self.broker.is_connected,
@@ -463,11 +530,16 @@ class CryptoDaemon:
                 "trailing_stop_pct": self._trailing_stop_pct,
                 "earn_active": self._earn is not None and self._earn._subscribed,
                 "carry_positions": {k.value: v for k, v in self._carry_positions.items()},
+                "equity": equity,
             }
             try:
                 HEARTBEAT_FILE.write_text(json.dumps(heartbeat, indent=2))
             except Exception as e:
                 logger.error("heartbeat_write_error", error=str(e))
+
+            if equity is not None and equity > 0:
+                self._append_equity_snapshot(equity)
+
             await asyncio.sleep(60)
 
     def _shutdown(self):
