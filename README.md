@@ -1,5 +1,12 @@
 # Aurel2 Crypto
 
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-dashboard-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Docker-deployable-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Binance](https://img.shields.io/badge/Binance-compatible-F0B90B?logo=binance&logoColor=black)](https://www.binance.com/)
+[![Mode](https://img.shields.io/badge/mode-testnet%20first-555555)](#safety-note)
+[![Scope](https://img.shields.io/badge/scope-momentum%20%2B%20carry-6B7280)](#strategy-stack)
+
 Aurel2 Crypto is a systematic crypto trading research platform focused on combining directional momentum with yield-aware cash management and funding-carry opportunities. It is the crypto sibling of Aurel2, designed around Binance-compatible market data/execution, testnet-first operation, and a dashboard that makes both live run behavior and backtest context visible.
 
 This repository is a public portfolio snapshot. It demonstrates architecture, research process, and trading-system ergonomics. It is not financial advice and is not a recommendation to trade these strategies.
