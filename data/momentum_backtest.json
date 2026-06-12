@@ -1,0 +1,16 @@
+{
+  "strategy": "momentum",
+  "start_date": "2021-01-01",
+  "end_date": "2026-03-31",
+  "initial_capital": 10000.0,
+  "final_value": 59565.4716882349,
+  "total_return_pct": 495.7,
+  "cagr_pct": 40.5,
+  "max_drawdown_pct": 83.1,
+  "sharpe_ratio": 0.76,
+  "sortino_ratio": 1.48,
+  "num_trades": 79,
+  "win_rate": 48.1,
+  "benchmark_final": 23256.824110714384,
+  "benchmark_return_pct": 132.6
+}

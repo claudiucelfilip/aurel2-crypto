@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aurel2-Crypto Dashboard</title>
+    <meta http-equiv="refresh" content="60">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent: #8b5cf6;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --orange: #f97316;
+            --border: #334155;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { font-size: 1.5rem; margin-bottom: 20px; }
+        h1 span { color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .card-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .card-value { font-size: 1.5rem; font-weight: 600; }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .green { background: var(--green); }
+        .yellow { background: var(--yellow); }
+        .red { background: var(--red); }
+        .positive { color: var(--green); }
+        .negative { color: var(--red); }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+        .badge-buy, .badge-momentum_buy, .badge-carry_entry { background: rgba(34,197,94,0.15); color: var(--green); }
+        .badge-sell, .badge-momentum_sell, .badge-carry_exit { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-stop_loss { background: rgba(239,68,68,0.3); color: var(--red); font-weight: 700; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; background: rgba(139,92,246,0.15); color: var(--accent); margin-right: 4px; }
+        .chart-container { position: relative; height: 400px; }
+        .period-select { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 500; color: var(--text); background: var(--bg); border: 1px solid var(--border); cursor: pointer; outline: none; }
+        .period-select:hover, .period-select:focus { border-color: var(--accent); }
+        .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+        .chart-stats { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
+        .chart-stat { text-align: center; }
+        .chart-stat-value { font-size: 1.2rem; font-weight: 600; }
+        .chart-stat-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
+        .footer { text-align: center; color: var(--text-muted); font-size: 0.75rem; margin-top: 40px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><span>Aurel2</span>-Crypto</h1>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Daemon Status</div>
+                <div class="card-value">
+                    {% if heartbeat %}
+                        <span class="status-dot {{ 'green' if heartbeat.status == 'healthy' else 'yellow' }}"></span>
+                        {{ heartbeat.status | capitalize }}
+                        {% if heartbeat.testnet %}<span class="tag">TESTNET</span>{% endif %}
+                    {% else %}
+                        <span class="status-dot red"></span> Offline
+                    {% endif %}
+                </div>
+                {% if heartbeat %}
+                <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 4px;">
+                    Last seen {{ heartbeat.seconds_ago }}s ago
+                    {% if heartbeat.error_count > 0 %}
+                        &middot; <span class="negative">{{ heartbeat.error_count }} errors</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="card">
+                <div class="card-label">Momentum</div>
+                <div class="card-value">
+                    {% if momentum_holding and momentum_holding != 'usdt' %}
+                        {{ momentum_holding | upper }}
+                    {% else %}
+                        USDT (cash)
+                    {% endif %}
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 4px;">
+                    28d lookback &middot; Weekly rebalance &middot; 10% trailing stop
+                    {% if heartbeat and heartbeat.last_momentum_check %}
+                        &middot; Last: {{ heartbeat.last_momentum_check }}
+                    {% endif %}
+                    {% if heartbeat and heartbeat.high_water_mark and heartbeat.high_water_mark > 0 %}
+                        <br>HWM: ${{ "{:,.2f}".format(heartbeat.high_water_mark) }}
+                        &middot; Stop at: ${{ "{:,.2f}".format(heartbeat.high_water_mark * 0.9) }}
+                    {% endif %}
+                </div>
+            </div>
+
+
+            <div class="card">
+                <div class="card-label">Exchange</div>
+                <div class="card-value">
+                    {% if heartbeat and heartbeat.connected %}
+                        <span class="status-dot green"></span> Binance
+                    {% else %}
+                        <span class="status-dot red"></span> Disconnected
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {% if live_progress %}
+        <div class="card">
+            <div class="card-header">
+                <div class="card-label" style="margin-bottom: 0;">
+                    Live {{ 'Demo / Testnet' if live_progress.testnet else 'Real-Money' }} Run
+                    &middot; started {{ live_progress.started_at[:10] }}
+                    &middot; {{ "%.1f"|format(live_progress.days_running) }} days
+                    {% if live_progress.period_exceeds_run %}
+                    &middot; <span style="color: var(--yellow);">showing full run ({{ "%.1f"|format(live_progress.days_running) }}d &lt; {{ period | upper }})</span>
+                    {% endif %}
+                </div>
+                <select class="period-select" onchange="window.location='?period='+this.value">
+                    {% for p in live_progress.available_periods %}
+                    <option value="{{ p }}" {% if period == p %}selected{% endif %}>{{ p | upper }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="chart-stats" style="margin-top: 0; margin-bottom: 16px;">
+                <div class="chart-stat">
+                    <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.2f}".format(live_progress.starting_equity) }}</div>
+                    <div class="chart-stat-label">Starting</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">${{ "{:,.2f}".format(live_progress.current_equity) }}</div>
+                    <div class="chart-stat-label">Current</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value {{ 'positive' if live_progress.pnl >= 0 else 'negative' }}">
+                        {{ '+' if live_progress.pnl >= 0 else '' }}${{ "{:,.2f}".format(live_progress.pnl) }}
+                    </div>
+                    <div class="chart-stat-label">P&amp;L (all-time)</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value {{ 'positive' if live_progress.pnl_pct >= 0 else 'negative' }}">
+                        {{ '+' if live_progress.pnl_pct >= 0 else '' }}{{ "%.2f"|format(live_progress.pnl_pct) }}%
+                    </div>
+                    <div class="chart-stat-label">Return (all-time)</div>
+                </div>
+                {% if period != 'all' %}
+                <div class="chart-stat">
+                    <div class="chart-stat-value {{ 'positive' if live_progress.window_pnl_pct >= 0 else 'negative' }}">
+                        {{ '+' if live_progress.window_pnl_pct >= 0 else '' }}{{ "%.2f"|format(live_progress.window_pnl_pct) }}%
+                    </div>
+                    <div class="chart-stat-label">{{ period | upper }} Return</div>
+                </div>
+                {% endif %}
+                <div class="chart-stat">
+                    <div class="chart-stat-value">${{ "{:,.2f}".format(live_progress.peak_equity) }}</div>
+                    <div class="chart-stat-label">Peak ({{ period | upper }})</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value {{ 'negative' if live_progress.drawdown_pct > 0 else '' }}">-{{ "%.2f"|format(live_progress.drawdown_pct) }}%</div>
+                    <div class="chart-stat-label">Drawdown ({{ period | upper }})</div>
+                </div>
+            </div>
+            <div class="chart-container" style="height: 280px;">
+                <canvas id="liveChart"></canvas>
+            </div>
+        </div>
+        {% else %}
+        <div class="card">
+            <div class="card-label">Live Run</div>
+            <div style="color: var(--text-muted); padding: 12px 0;">
+                Waiting for the daemon to record its first equity snapshot&hellip;
+                snapshots are written every 15 minutes once the broker is connected.
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_data %}
+        <div class="card">
+            <div class="card-label" style="margin-bottom: 12px;">Backtest Performance ({{ chart_data.summary.start_date }} to {{ chart_data.summary.end_date }})</div>
+            <div class="chart-container">
+                <canvas id="backtestChart"></canvas>
+            </div>
+            <div class="chart-stats">
+                <div class="chart-stat">
+                    <div class="chart-stat-value positive">${{ "{:,.0f}".format(chart_data.summary.momentum_final) }}</div>
+                    <div class="chart-stat-label">Final ({{ chart_data.summary.momentum_cagr }}% CAGR)</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.0f}".format(chart_data.summary.btc_final) }}</div>
+                    <div class="chart-stat-label">BTC Buy & Hold</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value positive">+${{ "{:,.0f}".format(chart_data.summary.momentum_final - chart_data.summary.btc_final) }}</div>
+                    <div class="chart-stat-label">Alpha vs BTC</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">{{ chart_data.summary.max_drawdown }}%</div>
+                    <div class="chart-stat-label">Max Drawdown</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">{{ chart_data.summary.sharpe }}</div>
+                    <div class="chart-stat-label">Sharpe</div>
+                </div>
+                <div class="chart-stat">
+                    <div class="chart-stat-value">${{ "{:,.0f}".format(chart_data.summary.yield_earned) }}</div>
+                    <div class="chart-stat-label">USDT Yield ({{ chart_data.summary.pct_time_in_cash }}% idle)</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-label" style="margin-bottom: 12px;">Recent Activity</div>
+            {% if trades %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Action</th>
+                        <th>Symbol</th>
+                        <th>Price</th>
+                        <th>Reasoning</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in trades %}
+                    <tr>
+                        <td style="white-space: nowrap;">{{ t.timestamp[:16] }}</td>
+                        <td><span class="badge badge-{{ t.action }}">{{ t.action }}</span></td>
+                        <td>{{ t.symbol }}</td>
+                        <td>{% if t.price %}${{ "{:,.2f}".format(t.price) }}{% else %}-{% endif %}</td>
+                        <td style="color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ t.reasoning }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="color: var(--text-muted); text-align: center; padding: 40px;">No trades yet</div>
+            {% endif %}
+        </div>
+
+        <div class="footer">
+            Aurel2-Crypto &middot; Auto-refreshes every 60s
+        </div>
+    </div>
+
+    {% if live_progress %}
+    <script>
+        const liveData = {{ live_progress | tojson }};
+        const startingEquity = liveData.starting_equity;
+        const liveCtx = document.getElementById('liveChart').getContext('2d');
+        new Chart(liveCtx, {
+            type: 'line',
+            data: {
+                labels: liveData.dates.map(d => d.slice(5, 16).replace('T', ' ')),
+                datasets: [
+                    {
+                        label: 'Equity (USDT)',
+                        data: liveData.equity,
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        fill: true,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1,
+                    },
+                    {
+                        label: 'Starting',
+                        data: liveData.equity.map(() => startingEquity),
+                        borderColor: '#94a3b8',
+                        borderWidth: 1,
+                        borderDash: [4, 4],
+                        pointRadius: 0,
+                        fill: false,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#94a3b8', maxTicksLimit: 10, font: { size: 10 } },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' },
+                    },
+                    y: {
+                        ticks: {
+                            color: '#94a3b8',
+                            font: { size: 10 },
+                            callback: function(val) { return '$' + val.toLocaleString(); },
+                        },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' },
+                    },
+                },
+            },
+        });
+    </script>
+    {% endif %}
+
+    {% if chart_data %}
+    <script>
+        const chartData = {{ chart_data | tojson }};
+
+        const ctx = document.getElementById('backtestChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.dates,
+                datasets: [
+                    {
+                        label: 'Aurel2-Crypto Momentum',
+                        data: chartData.momentum,
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        fill: true,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1,
+                    },
+                    {
+                        label: 'BTC Buy & Hold',
+                        data: chartData.btc_benchmark,
+                        borderColor: '#f97316',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        borderDash: [5, 3],
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#94a3b8', font: { size: 11 } },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString();
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            color: '#94a3b8',
+                            maxTicksLimit: 12,
+                            font: { size: 10 },
+                        },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' },
+                    },
+                    y: {
+                        ticks: {
+                            color: '#94a3b8',
+                            font: { size: 10 },
+                            callback: function(val) { return '$' + val.toLocaleString(); },
+                        },
+                        grid: { color: 'rgba(51, 65, 85, 0.5)' },
+                    },
+                },
+            },
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

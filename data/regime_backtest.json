@@ -1,0 +1,14 @@
+{
+  "baseline": {
+    "final_value": 46333.36,
+    "cagr_pct": 34.0,
+    "max_drawdown_pct": 79.7,
+    "sharpe": 0.72
+  },
+  "with_regime": {
+    "final_value": 10203.25,
+    "cagr_pct": 0.4,
+    "max_drawdown_pct": 87.1,
+    "sharpe": 0.41
+  }
+}
