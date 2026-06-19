@@ -6,6 +6,7 @@ build/
 .venv/
 *.egg
 .env
+.claude/
 .pytest_cache/
 .coverage
 data/cache/

@@ -24,6 +24,21 @@ aurel2-crypto live --paper          # demo/testnet daemon
 aurel2-crypto dashboard --port 8081 # dashboard
 ```
 
+Environment variables:
+```bash
+# Preferred
+AUREL2_CRYPTO_BINANCE_API_KEY=...
+AUREL2_CRYPTO_BINANCE_API_SECRET=...
+AUREL2_CRYPTO_BINANCE_TESTNET=true
+AUREL2_CRYPTO_NTFY_TOPIC=aurel2-crypto
+
+# Backward-compatible legacy names still accepted
+BINANCE_API_KEY=...
+BINANCE_API_SECRET=...
+BINANCE_TESTNET=true
+NTFY_TOPIC=aurel2-crypto
+```
+
 Production (this machine):
 ```bash
 bash scripts/deploy.sh   # rsyncs to /opt/aurel2-crypto and rebuilds containers

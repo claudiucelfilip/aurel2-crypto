@@ -130,24 +130,69 @@ class BinanceBroker(BaseBroker):
         """Run a synchronous ccxt call in executor."""
         return asyncio.get_event_loop().run_in_executor(None, func, *args)
 
+    async def _fetch_spot_balance(self) -> dict:
+        """Fetch spot balances without calling unsupported demo SAPI endpoints."""
+        if not self._testnet:
+            return await self._run_sync(self._spot.fetch_balance)
+
+        account = await self._run_sync(
+            lambda: self._spot.privateGetAccount({
+                "timestamp": int(time.time() * 1000),
+                "recvWindow": 10000,
+            })
+        )
+        total: dict[str, float] = {}
+        free: dict[str, float] = {}
+        for balance in account.get("balances", []):
+            asset = balance.get("asset")
+            if not asset:
+                continue
+            free_amount = float(balance.get("free", 0) or 0)
+            locked_amount = float(balance.get("locked", 0) or 0)
+            amount = free_amount + locked_amount
+            if amount > 0:
+                total[asset] = amount
+                free[asset] = free_amount
+
+        return {"total": total, "free": free}
+
     async def get_account_summary(self) -> AccountSummary:
         self._ensure_connected()
 
-        spot_balance = await self._run_sync(self._spot.fetch_balance)
-        spot_total = float(spot_balance.get("total", {}).get("USDT", 0))
+        spot_balance = await self._fetch_spot_balance()
+        spot_total = 0.0
+        spot_cash = 0.0
+
+        for currency, amount in spot_balance.get("total", {}).items():
+            qty = float(amount or 0)
+            if qty <= 0:
+                continue
+            if currency == "USDT":
+                spot_total += qty
+                spot_cash += float(spot_balance.get("free", {}).get("USDT", 0) or 0)
+                continue
+
+            symbol = f"{currency}/USDT"
+            price = await self.get_market_price(symbol)
+            if price:
+                spot_total += qty * price
 
         futures_total = 0.0
         futures_free = 0.0
+        unrealized_pnl = 0.0
         if self._futures:
             futures_balance = await self._run_sync(self._futures.fetch_balance)
-            futures_total = float(futures_balance.get("total", {}).get("USDT", 0))
-            futures_free = float(futures_balance.get("free", {}).get("USDT", 0))
+            futures_total = float(futures_balance.get("total", {}).get("USDT", 0) or 0)
+            futures_free = float(futures_balance.get("free", {}).get("USDT", 0) or 0)
+            unrealized_pnl = float(futures_balance.get("info", {}).get("totalUnrealizedProfit", 0) or 0)
+
+        margin_used = max(futures_total - futures_free, 0.0)
 
         return AccountSummary(
             total_value=spot_total + futures_total,
-            cash_balance=spot_total + futures_free,
-            unrealized_pnl=0.0,
-            margin_used=futures_total - futures_free,
+            cash_balance=spot_cash + futures_free,
+            unrealized_pnl=unrealized_pnl,
+            margin_used=margin_used,
         )
 
     async def get_positions(self) -> list[BrokerPosition]:
@@ -155,7 +200,7 @@ class BinanceBroker(BaseBroker):
         positions = []
 
         # Spot positions
-        balance = await self._run_sync(self._spot.fetch_balance)
+        balance = await self._fetch_spot_balance()
         for currency, amount in balance.get("total", {}).items():
             if float(amount) > 0 and currency != "USDT":
                 symbol = f"{currency}/USDT"
