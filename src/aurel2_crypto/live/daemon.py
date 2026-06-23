@@ -39,6 +39,9 @@ RUN_STATE_FILE = DATA_DIR / "run_state.json"
 # Equity snapshot interval (don't bloat the file — every 15 min is plenty)
 EQUITY_SNAPSHOT_INTERVAL_SEC = 900
 
+# Ignore exchange dust that is below Binance's practical min-notional order size.
+MIN_POSITION_VALUE_USDT = 10.0
+
 
 class CryptoDaemon:
     """24/7 crypto trading daemon."""
@@ -108,6 +111,8 @@ class CryptoDaemon:
             logger.error("broker_connection_failed")
             return
 
+        await self._restore_holding_from_account()
+
         # Initialize Flexible Earn (live only — demo API doesn't support /sapi/)
         if not self.settings.binance_testnet and self.broker._spot:
             self._earn = BinanceEarn(self.broker._spot)
@@ -163,6 +168,40 @@ class CryptoDaemon:
                     self.notifier.send_error(f"Check cycle error #{self._error_count}: {e}")
 
             await asyncio.sleep(300)  # 5 minutes
+
+    async def _restore_holding_from_account(self):
+        """Infer momentum state from account positions when persisted state is empty."""
+        if self._current_momentum_holding:
+            return
+
+        positions = await self.broker.get_positions()
+        for asset_id in MOMENTUM_ASSETS:
+            asset = ASSET_REGISTRY[asset_id]
+            position = next(
+                (
+                    p
+                    for p in positions
+                    if p.symbol == asset.symbol
+                    and p.shares > 0
+                    and float(p.market_value or 0) >= MIN_POSITION_VALUE_USDT
+                ),
+                None,
+            )
+            if not position:
+                continue
+
+            self._current_momentum_holding = asset_id
+            self._high_water_mark = float(position.market_price or 0)
+            logger.info(
+                "holding_restored_from_account",
+                holding=asset_id.value,
+                hwm=self._high_water_mark,
+            )
+            return
+
+        self._current_momentum_holding = CryptoAsset.USDT
+        self._high_water_mark = 0.0
+        logger.info("holding_restored_from_account", holding=CryptoAsset.USDT.value)
 
     def _should_check_carry(self, now: datetime) -> bool:
         if self._last_carry_check is None:
@@ -344,6 +383,10 @@ class CryptoDaemon:
         )
 
         if signal.action == SignalAction.HOLD:
+            if signal.asset_id:
+                self._current_momentum_holding = signal.asset_id
+                if signal.asset_id == CryptoAsset.USDT:
+                    self._high_water_mark = 0.0
             return
 
         target = signal.asset_id
@@ -375,6 +418,13 @@ class CryptoDaemon:
         position = await self.broker.get_position(symbol)
         if not position or position.shares <= 0:
             logger.warning("sell_no_position", symbol=symbol)
+            return None
+        if float(position.market_value or 0) < MIN_POSITION_VALUE_USDT:
+            logger.info(
+                "sell_position_dust_ignored",
+                symbol=symbol,
+                market_value=position.market_value,
+            )
             return None
 
         order = BrokerOrder(symbol=symbol, action="SELL", quantity=position.shares)
@@ -457,15 +507,7 @@ class CryptoDaemon:
         """Compute total account equity (USDT cash + market value of positions)."""
         try:
             summary = await self.broker.get_account_summary()
-            total = float(summary.total_value or 0)
-            # get_account_summary already includes spot USDT + futures total,
-            # but spot non-USDT holdings (e.g. ETH) need to be priced in.
-            positions = await self.broker.get_positions()
-            for p in positions:
-                # Only spot positions (futures already counted in futures_total)
-                if ":" not in p.symbol and p.market_value:
-                    total += float(p.market_value)
-            return total
+            return float(summary.total_value or 0)
         except Exception as e:
             logger.warning("equity_compute_failed", error=str(e))
             return None
