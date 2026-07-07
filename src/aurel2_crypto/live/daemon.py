@@ -89,10 +89,19 @@ class CryptoDaemon:
                             self._current_momentum_holding = ca
                             break
                 self._high_water_mark = hb.get("high_water_mark", 0.0)
+                # Restore rebalance timer so a restart doesn't reset the weekly
+                # schedule and silently re-run (or, worse, skip catch-up).
+                lmc = hb.get("last_momentum_check")
+                if lmc:
+                    try:
+                        self._last_momentum_check = date.fromisoformat(lmc)
+                    except ValueError:
+                        pass
                 logger.info(
                     "state_restored",
                     holding=self._current_momentum_holding.value if self._current_momentum_holding else None,
                     hwm=self._high_water_mark,
+                    last_momentum_check=self._last_momentum_check.isoformat() if self._last_momentum_check else None,
                 )
             except Exception as e:
                 logger.warning("state_restore_failed", error=str(e))
@@ -164,7 +173,12 @@ class CryptoDaemon:
             except Exception as e:
                 self._error_count += 1
                 logger.error("check_cycle_error", error=str(e), count=self._error_count)
-                if self.notifier and self._error_count <= 3:
+                # Alert on the first few, then again on every sustained-failure
+                # milestone — a loop that errors for hours must not go silent
+                # after 3 pings while the heartbeat still reads "healthy".
+                if self.notifier and (
+                    self._error_count <= 3 or self._error_count % 30 == 0
+                ):
                     self.notifier.send_error(f"Check cycle error #{self._error_count}: {e}")
 
             await asyncio.sleep(300)  # 5 minutes
@@ -210,11 +224,17 @@ class CryptoDaemon:
 
     def _should_check_momentum(self, now: datetime) -> bool:
         today = now.date()
-        if today.weekday() != 0:  # Monday only for full rebalance
-            return False
         if self._last_momentum_check == today:
             return False
-        return now.hour >= 0  # Any time on Monday
+        # Normal cadence: full rebalance on Mondays.
+        if today.weekday() == 0:
+            return True
+        # Catch-up: if a scheduled Monday was missed (daemon down / restarted
+        # off-schedule), rebalance as soon as we're back rather than waiting a
+        # full week. Triggers once the last check is 7+ days stale, or never ran.
+        if self._last_momentum_check is None:
+            return True
+        return (today - self._last_momentum_check) >= timedelta(days=7)
 
     def _should_check_daily_filter(self, now: datetime) -> bool:
         """Daily absolute momentum check — exit if all coins negative."""

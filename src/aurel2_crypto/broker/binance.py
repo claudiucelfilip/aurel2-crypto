@@ -19,6 +19,12 @@ from aurel2_crypto.broker.base import (
 
 logger = structlog.get_logger()
 
+# Retry transient failures (nginx 5xx, timeouts, rate-limit/DDoS guard) —
+# ccxt.NetworkError is the base class for ExchangeNotAvailable / RequestTimeout /
+# DDoSProtection. Genuine ExchangeError (bad order, auth) is NOT retried.
+_MAX_RETRIES = 4
+_TRANSIENT_ERRORS = (ccxt.NetworkError,)
+
 
 class BinanceBroker(BaseBroker):
     """Binance exchange broker using ccxt.
@@ -126,9 +132,26 @@ class BinanceBroker(BaseBroker):
     def is_connected(self) -> bool:
         return self._connected
 
-    def _run_sync(self, func, *args):
-        """Run a synchronous ccxt call in executor."""
-        return asyncio.get_event_loop().run_in_executor(None, func, *args)
+    async def _run_sync(self, func, *args):
+        """Run a synchronous ccxt call in executor, retrying transient errors.
+
+        Binance/nginx 5xx (502/503/504) and network blips are transient — a
+        single failure used to skip the whole cycle for 60s. Retry a few times
+        with exponential backoff before giving up.
+        """
+        loop = asyncio.get_event_loop()
+        delay = 1.0
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return await loop.run_in_executor(None, func, *args)
+            except _TRANSIENT_ERRORS as e:
+                if attempt == _MAX_RETRIES - 1:
+                    raise
+                logger.warning(
+                    "broker_retry", error=str(e)[:200], attempt=attempt + 1, delay=delay
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
 
     async def _fetch_spot_balance(self) -> dict:
         """Fetch spot balances without calling unsupported demo SAPI endpoints."""
