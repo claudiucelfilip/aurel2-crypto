@@ -10,3 +10,4 @@ build/
 .pytest_cache/
 .coverage
 data/cache/
+uv.lock
