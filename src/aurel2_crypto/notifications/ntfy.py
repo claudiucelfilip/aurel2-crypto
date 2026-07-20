@@ -14,10 +14,17 @@ _last_notification_time: dict[str, float] = {}
 class NtfyNotifier:
     """Send push notifications via ntfy.sh."""
 
-    def __init__(self, topic: str, server: str = "https://ntfy.sh", rate_limit_seconds: int = 3600):
+    def __init__(
+        self,
+        topic: str,
+        server: str = "https://ntfy.sh",
+        rate_limit_seconds: int = 3600,
+        timeout_seconds: float = 10.0,
+    ):
         self.topic = topic
         self.server = server.rstrip("/")
         self.rate_limit_seconds = rate_limit_seconds
+        self.timeout_seconds = timeout_seconds
 
     def send(
         self,
@@ -42,15 +49,31 @@ class NtfyNotifier:
             headers["Tags"] = ",".join(tags)
 
         try:
-            response = httpx.post(url, content=message, headers=headers)
+            response = httpx.post(
+                url,
+                content=message,
+                headers=headers,
+                timeout=self.timeout_seconds,
+            )
             if response.status_code == 200:
                 if category:
                     _last_notification_time[category] = time.time()
                 logger.info("notification_sent", topic=self.topic, title=title)
                 return True
             else:
-                logger.warning("notification_failed", status=response.status_code)
+                logger.warning(
+                    "notification_failed",
+                    status=response.status_code,
+                    response=response.text[:300],
+                )
                 return False
+        except httpx.TimeoutException as e:
+            logger.error(
+                "notification_timeout",
+                error=str(e),
+                timeout_seconds=self.timeout_seconds,
+            )
+            return False
         except Exception as e:
             logger.error("notification_error", error=str(e))
             return False
