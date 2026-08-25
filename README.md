@@ -2,7 +2,7 @@
 
 Systematic crypto trading system. Two independent strategies running 24/7 against Binance:
 
-- **Momentum** — weekly rebalance into the strongest of {BTC, ETH, SOL, AVAX, LINK} over a 28-day lookback. 10% trailing stop-loss. Daily absolute-momentum filter exits to USDT when all coins are negative.
+- **Momentum** — weekly rebalance into the strongest of {BTC, ETH, SOL, AVAX, LINK} over a 28-day lookback. 10% trailing stop-loss evaluated once per day on the daily close (intraday evaluation whipsaws — see scripts/backtest_stop_hourly.py). Daily absolute-momentum filter exits to USDT when all coins are negative.
 - **Funding carry** — opens cash-and-carry positions (long spot + short perp) when 8h funding rates exceed the entry threshold. Live mode only — Binance demo API is spot-only.
 - **Idle USDT yield** — Flexible Earn subscribes idle USDT cash between trades (live mode only).
 

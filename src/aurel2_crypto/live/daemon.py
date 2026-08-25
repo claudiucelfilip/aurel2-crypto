@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
+import pandas as pd
 import structlog
 
 from aurel2_crypto.broker.binance import BinanceBroker
@@ -71,6 +72,7 @@ class CryptoDaemon:
         self._carry_positions: dict[CryptoAsset, bool] = {a: False for a in CARRY_ASSETS}
         self._high_water_mark: float = 0.0
         self._trailing_stop_pct = settings.trailing_stop_pct
+        self._last_stop_check_day: date | None = None
         self._earn: BinanceEarn | None = None  # Initialized after broker connects
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -151,7 +153,7 @@ class CryptoDaemon:
             try:
                 now = datetime.utcnow()
 
-                # Trailing stop: check every cycle (every 5 min)
+                # Trailing stop: evaluated once per UTC day on the daily close
                 await self._check_trailing_stop()
 
                 # Carry: check every 8 hours
@@ -284,7 +286,12 @@ class CryptoDaemon:
                 self._record_trade("carry_exit", asset_id.value, rate, f"Funding rate dropped to {rate:.4%}/8h")
 
     async def _check_trailing_stop(self):
-        """Check trailing stop-loss every cycle (every 5 min)."""
+        """Check trailing stop against the last completed DAILY CLOSE, once per UTC day.
+
+        The 10% stop was validated on daily-close backtests; checking live 5-min
+        prices made it effectively far tighter (intraday wicks fired it constantly)
+        and destroyed the edge — see scripts/backtest_stop_mode.py / _stop_hourly.py.
+        """
         if self._trailing_stop_pct <= 0:
             return
         if not self._current_momentum_holding:
@@ -292,12 +299,19 @@ class CryptoDaemon:
         if self._current_momentum_holding == CryptoAsset.USDT:
             return
 
-        asset = ASSET_REGISTRY[self._current_momentum_holding]
-        price = await self.broker.get_market_price(asset.symbol)
-        if not price:
+        today = datetime.utcnow().date()
+        if self._last_stop_check_day == today:
             return
 
-        # Update high water mark
+        asset = ASSET_REGISTRY[self._current_momentum_holding]
+        price = self._get_last_daily_close(asset.symbol)
+        if not price:
+            return
+        self._last_stop_check_day = today
+
+        logger.info("trailing_stop_daily_check", symbol=asset.symbol, close=price, hwm=self._high_water_mark)
+
+        # Update high water mark from daily closes only
         if price > self._high_water_mark:
             self._high_water_mark = price
 
@@ -335,6 +349,25 @@ class CryptoDaemon:
             await self._sell_position(asset.symbol, "stop_loss", reasoning)
             self._current_momentum_holding = CryptoAsset.USDT
             self._high_water_mark = 0.0
+
+    def _get_last_daily_close(self, symbol: str) -> float | None:
+        """Close of the most recent COMPLETED UTC daily candle (excludes today's partial)."""
+        try:
+            prices = self.data_provider.get_multi_ohlcv(
+                symbols=[symbol], timeframe="1d",
+                start_date=datetime.utcnow() - timedelta(days=5),
+                end_date=datetime.utcnow(),
+            )
+        except Exception as e:
+            logger.warning("daily_close_fetch_failed", symbol=symbol, error=str(e))
+            return None
+        if prices.empty:
+            return None
+        ap = prices[prices["symbol"] == symbol].copy()
+        ap = ap[pd.to_datetime(ap["timestamp"]).dt.date < datetime.utcnow().date()]
+        if ap.empty:
+            return None
+        return float(ap.sort_values("timestamp").iloc[-1]["close"])
 
     async def _run_daily_filter(self, now: datetime):
         """Daily absolute momentum check — exit to USDT if all coins trending down."""
@@ -455,6 +488,10 @@ class CryptoDaemon:
             status=result.status, filled=result.filled_quantity,
             price=result.avg_fill_price,
         )
+        if not result.filled_quantity or result.filled_quantity <= 0:
+            # Nothing actually sold — don't journal a phantom "Sold 0 @ $0.00"
+            logger.warning("sell_zero_fill", symbol=symbol, status=result.status)
+            return result
         self._record_trade(
             action, symbol, result.avg_fill_price,
             f"{reasoning} | Sold {result.filled_quantity} @ ${result.avg_fill_price:,.2f}",
@@ -546,6 +583,12 @@ class CryptoDaemon:
             last_ts = curve[-1].get("timestamp", 0)
             if now - last_ts < EQUITY_SNAPSHOT_INTERVAL_SEC:
                 return  # Too soon, skip
+            # Sanity clamp: a >50% jump between 15-min snapshots is a broken
+            # read (partial API response mid-trade), not a real equity move.
+            last_eq = curve[-1].get("equity", 0)
+            if last_eq > 0 and not (0.5 * last_eq <= equity <= 2.0 * last_eq):
+                logger.warning("equity_snapshot_rejected", equity=equity, last=last_eq)
+                return
 
         curve.append({
             "timestamp": now,
