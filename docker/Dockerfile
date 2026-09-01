@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 
 WORKDIR /app
+# Dumbo's uplink drops mid-download; without retries a single PyPI stall kills the build.
+ENV PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10 UV_HTTP_TIMEOUT=300
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
