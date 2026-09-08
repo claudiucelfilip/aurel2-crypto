@@ -35,7 +35,13 @@ def fetch_hourly(ex, symbol, since_ms, until_ms):
     rows = []
     cursor = since_ms
     while cursor < until_ms:
-        batch = ex.fetch_ohlcv(symbol, "1h", since=cursor, limit=1000)
+        batch = None
+        for attempt in range(10):  # Dumbo's uplink stalls; retry with backoff
+            try:
+                batch = ex.fetch_ohlcv(symbol, "1h", since=cursor, limit=1000)
+                break
+            except Exception:
+                time.sleep(2 * (attempt + 1))
         if not batch:
             break
         rows.extend(batch)
