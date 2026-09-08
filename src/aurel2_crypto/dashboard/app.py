@@ -72,6 +72,55 @@ def get_equity_curve() -> list[dict]:
         return []
 
 
+_btc_cache: dict = {"ts": 0.0, "since": 0.0, "candles": []}
+BTC_CACHE_TTL_SEC = 900
+
+
+def get_btc_hourly(since_ts: float) -> list[tuple[float, float]]:
+    """(timestamp_sec, close) hourly BTC/USDT candles from `since_ts`, cached 15 min."""
+    now = time.time()
+    c = _btc_cache
+    if c["candles"] and c["since"] <= since_ts and now - c["ts"] < BTC_CACHE_TTL_SEC:
+        return c["candles"]
+    try:
+        import ccxt
+        ex = ccxt.binance({"enableRateLimit": True})
+        cursor = int(since_ts * 1000)
+        rows: list[tuple[float, float]] = []
+        while cursor < now * 1000:
+            batch = ex.fetch_ohlcv("BTC/USDT", "1h", since=cursor, limit=1000)
+            if not batch:
+                break
+            rows.extend((b[0] / 1000, float(b[4])) for b in batch)
+            cursor = batch[-1][0] + 3600_000
+        _btc_cache.update(ts=now, since=since_ts, candles=rows)
+        return rows
+    except Exception:
+        return c["candles"]  # stale-or-empty beats a broken dashboard
+
+
+def btc_benchmark_for(points: list[dict], starting_equity: float, started_ts: float) -> list[float | None]:
+    """BTC buy-and-hold equity (same starting cash, bought at run start) aligned to each snapshot."""
+    candles = get_btc_hourly(started_ts - 3600)
+    if not candles or starting_equity <= 0:
+        return []
+    from bisect import bisect_right
+    times = [t for t, _ in candles]
+
+    def price_at(ts: float) -> float | None:
+        i = bisect_right(times, ts) - 1
+        return candles[i][1] if i >= 0 else None
+
+    p0 = price_at(started_ts)
+    if not p0:
+        return []
+    out = []
+    for p in points:
+        px = price_at(float(p.get("timestamp") or 0))
+        out.append(round(starting_equity * px / p0, 2) if px else None)
+    return out
+
+
 def get_live_progress(period: str = DEFAULT_PERIOD) -> dict | None:
     """Compile live testnet/demo run progress from equity curve + run state.
 
@@ -118,6 +167,11 @@ def get_live_progress(period: str = DEFAULT_PERIOD) -> dict | None:
     # Period exceeds the actual run length → we're showing all available data
     period_exceeds_run = days is not None and days > days_running
 
+    # BTC buy-and-hold with the same starting cash, for the chart + alpha stat
+    btc_curve = btc_benchmark_for(windowed, starting_equity, started_ts) if started_ts else []
+    btc_final = next((v for v in reversed(btc_curve) if v is not None), None)
+    alpha = (current_equity - btc_final) if btc_final is not None else None
+
     # Build the list of period options worth offering. Hide periods that would
     # show the exact same data as the next-shorter one (e.g. don't offer 1Y
     # when the run is only 6 days old — it's identical to ALL).
@@ -157,6 +211,9 @@ def get_live_progress(period: str = DEFAULT_PERIOD) -> dict | None:
         "available_periods": available_periods,
         "dates": [p.get("iso", "") for p in windowed],
         "equity": [p.get("equity", 0) for p in windowed],
+        "btc_benchmark": btc_curve,
+        "btc_final": btc_final,
+        "alpha": alpha,
     }
 
 

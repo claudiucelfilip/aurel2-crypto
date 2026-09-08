@@ -132,13 +132,21 @@
             </div>
             <div class="chart-stats" style="margin-top: 0; margin-bottom: 16px;">
                 <div class="chart-stat">
-                    <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.2f}".format(live_progress.starting_equity) }}</div>
-                    <div class="chart-stat-label">Starting</div>
+                    <div class="chart-stat-value">${{ "{:,.2f}".format(live_progress.current_equity) }}</div>
+                    <div class="chart-stat-label">Current (from ${{ "{:,.0f}".format(live_progress.starting_equity) }})</div>
+                </div>
+                {% if live_progress.btc_final is not none %}
+                <div class="chart-stat">
+                    <div class="chart-stat-value" style="color: var(--text-muted);">${{ "{:,.2f}".format(live_progress.btc_final) }}</div>
+                    <div class="chart-stat-label">BTC Buy &amp; Hold</div>
                 </div>
                 <div class="chart-stat">
-                    <div class="chart-stat-value">${{ "{:,.2f}".format(live_progress.current_equity) }}</div>
-                    <div class="chart-stat-label">Current</div>
+                    <div class="chart-stat-value {{ 'positive' if live_progress.alpha >= 0 else 'negative' }}">
+                        {{ '+' if live_progress.alpha >= 0 else '' }}${{ "{:,.2f}".format(live_progress.alpha) }}
+                    </div>
+                    <div class="chart-stat-label">Alpha vs BTC</div>
                 </div>
+                {% endif %}
                 <div class="chart-stat">
                     <div class="chart-stat-value {{ 'positive' if live_progress.pnl >= 0 else 'negative' }}">
                         {{ '+' if live_progress.pnl >= 0 else '' }}${{ "{:,.2f}".format(live_progress.pnl) }}
@@ -272,15 +280,17 @@
                         pointRadius: 0,
                         tension: 0.1,
                     },
-                    {
-                        label: 'Starting',
-                        data: liveData.equity.map(() => startingEquity),
-                        borderColor: '#94a3b8',
-                        borderWidth: 1,
-                        borderDash: [4, 4],
+                    ...(liveData.btc_benchmark && liveData.btc_benchmark.length ? [{
+                        label: 'BTC Buy & Hold',
+                        data: liveData.btc_benchmark,
+                        borderColor: '#f97316',
+                        borderWidth: 1.5,
+                        borderDash: [5, 3],
                         pointRadius: 0,
+                        tension: 0.1,
                         fill: false,
-                    },
+                        spanGaps: true,
+                    }] : []),
                 ],
             },
             options: {
