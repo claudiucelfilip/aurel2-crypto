@@ -51,7 +51,7 @@ def fetch_hourly(ex, symbol, since_ms, until_ms):
 def build_data():
     ex = ccxt.binance({"enableRateLimit": True})
     since = int(datetime(2020, 11, 1).timestamp() * 1000)
-    until = int(datetime(2026, 8, 25).timestamp() * 1000)
+    until = int(time.time() * 1000)
     hourly, daily_close = {}, {}
     for aid, sym in SYMBOLS.items():
         df = fetch_hourly(ex, sym, since, until)
