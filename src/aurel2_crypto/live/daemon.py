@@ -376,7 +376,7 @@ class CryptoDaemon:
         prices = self.data_provider.get_multi_ohlcv(
             symbols=get_all_symbols(),
             timeframe="1d",
-            start_date=datetime.utcnow() - timedelta(days=60),
+            start_date=datetime.utcnow() - timedelta(days=self.settings.momentum_lookback_days + 30),
             end_date=datetime.utcnow(),
         )
         if prices.empty:
@@ -415,7 +415,7 @@ class CryptoDaemon:
         prices = self.data_provider.get_multi_ohlcv(
             symbols=get_all_symbols(),
             timeframe="1d",
-            start_date=datetime.utcnow() - timedelta(days=60),
+            start_date=datetime.utcnow() - timedelta(days=self.settings.momentum_lookback_days + 30),
             end_date=datetime.utcnow(),
         )
 
