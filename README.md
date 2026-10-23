@@ -2,7 +2,7 @@
 
 Systematic crypto trading system. Two independent strategies running 24/7 against Binance:
 
-- **Momentum** — weekly rebalance into the strongest of {BTC, ETH, SOL, AVAX, LINK} over a 28-day lookback. 10% trailing stop-loss evaluated once per day on the daily close (intraday evaluation whipsaws — see scripts/backtest_stop_hourly.py). Daily absolute-momentum filter exits to USDT when all coins are negative.
+- **Momentum** — BTC-only trend since 2026-10-23: enter BTC on Monday when its 56-day momentum is positive, exit to USDT on any daily close where it is not. No trailing stop. The earlier 5-coin rotation (BTC/ETH/SOL/AVAX/LINK, 28d, 10% stop) lost 2024–2026 and the Apr–Oct 2026 paper run; see docs/backtests/2026-10-23-oos-btc-vs-rotation.md. Universe/lookback/stop are env-configurable (`AUREL2_CRYPTO_MOMENTUM_ASSETS`, `..._LOOKBACK_DAYS`, `..._TRAILING_STOP_PCT`).
 - **Funding carry** — opens cash-and-carry positions (long spot + short perp) when 8h funding rates exceed the entry threshold. Live mode only — Binance demo API is spot-only.
 - **Idle USDT yield** — Flexible Earn subscribes idle USDT cash between trades (live mode only).
 

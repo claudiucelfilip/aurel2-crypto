@@ -58,6 +58,7 @@ class CryptoDaemon:
         self.momentum = ShortTermMomentumStrategy(
             lookback_days=settings.momentum_lookback_days,
             rebalance_days=settings.momentum_rebalance_days,
+            assets=settings.momentum_asset_list,
         )
         self.carry = FundingCarryStrategy(
             entry_rate=settings.carry_min_funding_rate,
@@ -335,8 +336,7 @@ class CryptoDaemon:
                 f"${self._high_water_mark:,.2f} → ${price:,.2f} "
                 f"(threshold: {self._trailing_stop_pct:.0%})"
             )
-            self._record_trade("stop_loss", asset.symbol, price, reasoning)
-
+            # Journaled once, by _sell_position, at the fill price.
             if self.notifier:
                 self.notifier.send(
                     message=reasoning,
@@ -383,7 +383,7 @@ class CryptoDaemon:
             return
 
         scores = calculate_momentum_scores(
-            prices, MOMENTUM_ASSETS, now.date(), self.settings.momentum_lookback_days,
+            prices, self.momentum.assets, now.date(), self.settings.momentum_lookback_days,
         )
         if not scores:
             return

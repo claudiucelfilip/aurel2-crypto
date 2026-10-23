@@ -42,8 +42,14 @@ class Settings(BaseSettings):
     )
 
     # Momentum strategy
+    # BTC-only since 2026-10-23: the 5-coin rotation lost 2024-2026 and the paper run
+    # (docs/backtests/2026-10-23-oos-btc-vs-rotation.md). Comma-separated asset ids.
+    momentum_assets: str = Field(
+        default="BTC",
+        validation_alias=AliasChoices("AUREL2_CRYPTO_MOMENTUM_ASSETS", "MOMENTUM_ASSETS"),
+    )
     momentum_lookback_days: int = Field(
-        default=28,
+        default=56,
         validation_alias=AliasChoices("AUREL2_CRYPTO_MOMENTUM_LOOKBACK_DAYS", "MOMENTUM_LOOKBACK_DAYS"),
     )
     momentum_rebalance_days: int = Field(
@@ -51,9 +57,19 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AUREL2_CRYPTO_MOMENTUM_REBALANCE_DAYS", "MOMENTUM_REBALANCE_DAYS"),
     )
     trailing_stop_pct: float = Field(
-        default=0.10,
+        default=0.0,
         validation_alias=AliasChoices("AUREL2_CRYPTO_TRAILING_STOP_PCT", "TRAILING_STOP_PCT"),
-    )  # 10% trailing stop-loss
+    )  # 0 = off. The stop never added return on BTC (scripts/backtest_btc_only.py).
+
+    @property
+    def momentum_asset_list(self) -> list:
+        from aurel2_crypto.core.models import CryptoAsset
+
+        ids = [a.strip().lower() for a in self.momentum_assets.split(",") if a.strip()]
+        assets = [CryptoAsset(a) for a in ids if a != "usdt"]
+        if not assets:
+            raise ValueError("momentum_assets must name at least one tradable asset")
+        return assets
 
     # Carry strategy
     carry_min_funding_rate: float = Field(
