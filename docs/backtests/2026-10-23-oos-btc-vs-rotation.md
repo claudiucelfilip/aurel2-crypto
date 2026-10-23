@@ -117,3 +117,47 @@ windows above with the fewest trades; 28d has the worst out-of-sample drawdown),
 entry, daily-close exit to USDT, trailing stop off. Dashboard run re-anchored at $9,043.23 on
 2026-10-23; the 5-coin run's anchor is kept in `run_state.5coin-2026-04-02.json`. First decision
 under the new rules: Monday 2026-10-26.
+
+## Deployed-rule check (scripts/backtest_verify_btc56.py, run 2026-10-23, data to 2026-10-23)
+
+    BTC/USDT: 52365 hourly candles
+    ### hourly engine (BTC only), lookback 56 vs 28, no stop
+    
+    -- lookback 56 (data to 2026-10-23)
+    window                           variant       final    CAGR   maxDD Sharpe  trd
+    2021-01 -> now                   bh           24,579   16.8%  -76.6%   0.57    1
+    2021-01 -> now                   mom-only     82,738   44.0%  -38.0%   1.15   65
+    2024-01 -> now                   bh           19,183   26.1%  -53.0%   0.70    1
+    2024-01 -> now                   mom-only     17,738   22.6%  -32.3%   0.76   35
+    last 12mo                        bh            7,085  -29.2%  -48.9%  -0.57    1
+    last 12mo                        mom-only      9,626   -3.7%  -18.8%  -0.09    9
+    paper window 2026-04-02 -> now   bh           11,757   33.6%  -28.7%   0.97    1
+    paper window 2026-04-02 -> now   mom-only     10,179    3.2%  -18.8%   0.25    5
+    
+    -- lookback 28 (data to 2026-10-23)
+    window                           variant       final    CAGR   maxDD Sharpe  trd
+    2021-01 -> now                   bh           24,579   16.8%  -76.6%   0.57    1
+    2021-01 -> now                   mom-only     48,411   31.3%  -32.3%   0.94  108
+    2024-01 -> now                   bh           19,183   26.1%  -53.0%   0.70    1
+    2024-01 -> now                   mom-only     15,101   15.8%  -32.3%   0.59   64
+    last 12mo                        bh            7,085  -29.2%  -48.9%  -0.57    1
+    last 12mo                        mom-only      9,446   -5.5%  -18.0%  -0.15   24
+    paper window 2026-04-02 -> now   bh           11,757   33.6%  -28.7%   0.97    1
+    paper window 2026-04-02 -> now   mom-only     10,788   14.6%  -12.4%   0.68   12
+    
+    ### daily engine calendar years, BTC-only momentum, lookbacks 42/56/70 (neighbours) vs B&H
+    year     BTC B&H     mom42     mom56     mom70
+    2018        -72%      -44%      -44%      -44%
+    2019        +89%     +138%     +122%     +158%
+    2020       +302%     +294%     +144%      +31%
+    2021        +58%      +68%     +152%      +42%
+    2022        -65%      -35%      -17%      -27%
+    2023       +154%      +96%     +116%      +40%
+    2024       +112%      +87%      +63%     +119%
+    2025         -7%       -6%       +6%       +1%
+    2026         -9%       +7%       -2%       -3%
+
+Reading: the rule's whole edge over BTC buy-and-hold comes from the bear years (2018, 2022). Since
+2024 it trails buy-and-hold on return (22.6% vs 26.1% CAGR) and wins only on drawdown (−32% vs −53%)
+and Sharpe (0.76 vs 0.70). Single-year results swing hard with the lookback (2020: 42d +294%,
+56d +144%, 70d +31%). It is a drawdown-control rule on BTC, not alpha. Same shape as Aurel2.
