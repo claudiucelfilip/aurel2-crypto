@@ -109,3 +109,11 @@ daily close, exit to USDT) on paper, then decide on real money.
 
 Journal bug noted: `daemon.py` records `stop_loss` twice per stop (intent before the sell, fill
 after). One sell happens; the dashboard shows each stop twice.
+
+## Done 2026-10-23
+
+Deployed on Dumbo (commit 0520dd8): universe BTC only, 56-day momentum (top-2 in all three
+windows above with the fewest trades; 28d has the worst out-of-sample drawdown), weekly Monday
+entry, daily-close exit to USDT, trailing stop off. Dashboard run re-anchored at $9,043.23 on
+2026-10-23; the 5-coin run's anchor is kept in `run_state.5coin-2026-04-02.json`. First decision
+under the new rules: Monday 2026-10-26.
