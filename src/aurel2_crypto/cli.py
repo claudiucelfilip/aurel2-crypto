@@ -73,7 +73,7 @@ def live(
 
 @app.command()
 def dashboard(
-    host: str = typer.Option("0.0.0.0", help="Dashboard host"),
+    host: str = typer.Option("127.0.0.1", help="Dashboard host"),
     port: int = typer.Option(8081, help="Dashboard port"),
 ):
     """Run the web dashboard."""
